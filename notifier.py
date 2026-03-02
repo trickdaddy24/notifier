@@ -517,6 +517,15 @@ def set_email_credentials():
     print(f"{Fore.GREEN}✅ Gmail credentials updated.{Style.RESET_ALL}")
 
 # ==================== NOTIFICATION CRUD ====================
+def _parse_due_time(due_str):
+    """Parse a due time string and return a normalized datetime, or None on failure."""
+    for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S"):
+        try:
+            return datetime.strptime(due_str, fmt)
+        except ValueError:
+            continue
+    return None
+
 def add_notification():
     print(f"{Fore.YELLOW}Enter message: {Style.RESET_ALL}", end="")
     msg = input().strip()
@@ -524,17 +533,20 @@ def add_notification():
         print(f"{Fore.RED}❌ Message cannot be empty!{Style.RESET_ALL}")
         return
 
-    print(f"{Fore.YELLOW}Enter due time (e.g., '2025-10-08 14:00'): {Style.RESET_ALL}", end="")
-    due = input().strip()
+    print(f"{Fore.YELLOW}Enter due time (e.g., '{datetime.now().strftime('%Y-%m-%d')} 14:00'): {Style.RESET_ALL}", end="")
+    due_raw = input().strip()
 
-    try:
-        datetime.strptime(due, "%Y-%m-%d %H:%M")
-    except ValueError:
-        try:
-            datetime.strptime(due, "%Y-%m-%d %H:%M:%S")
-        except ValueError:
-            print(f"{Fore.RED}❌ Invalid date format! Use YYYY-MM-DD HH:MM{Style.RESET_ALL}")
-            return
+    due_dt = _parse_due_time(due_raw)
+    if due_dt is None:
+        print(f"{Fore.RED}❌ Invalid date format! Use YYYY-MM-DD HH:MM{Style.RESET_ALL}")
+        return
+
+    if due_dt <= datetime.now():
+        print(f"{Fore.RED}❌ Due time must be in the future!{Style.RESET_ALL}")
+        return
+
+    # Normalize to zero-padded format so string comparison in the DB is reliable
+    due = due_dt.strftime("%Y-%m-%d %H:%M")
 
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
@@ -542,7 +554,7 @@ def add_notification():
     notification_id = c.lastrowid
     conn.commit()
     conn.close()
-    print(f"{Fore.GREEN}✅ Added! ID: {notification_id}{Style.RESET_ALL}")
+    print(f"{Fore.GREEN}✅ Added! ID: {notification_id} | Due: {due}{Style.RESET_ALL}")
 
 def view_notifications():
     conn = sqlite3.connect(DB_NAME)
@@ -611,14 +623,15 @@ def edit_notification():
     new_due = input().strip() or row[2]
 
     if new_due != row[2]:
-        try:
-            datetime.strptime(new_due, "%Y-%m-%d %H:%M")
-        except ValueError:
-            try:
-                datetime.strptime(new_due, "%Y-%m-%d %H:%M:%S")
-            except ValueError:
-                print(f"{Fore.RED}❌ Invalid format! Keeping original.{Style.RESET_ALL}")
-                new_due = row[2]
+        due_dt = _parse_due_time(new_due)
+        if due_dt is None:
+            print(f"{Fore.RED}❌ Invalid format! Keeping original.{Style.RESET_ALL}")
+            new_due = row[2]
+        elif due_dt <= datetime.now():
+            print(f"{Fore.RED}❌ Due time must be in the future! Keeping original.{Style.RESET_ALL}")
+            new_due = row[2]
+        else:
+            new_due = due_dt.strftime("%Y-%m-%d %H:%M")
 
     c.execute("UPDATE notifications SET message = ?, due_time = ? WHERE id = ?", (new_msg, new_due, notif_id))
     conn.commit()
@@ -626,14 +639,20 @@ def edit_notification():
     print(f"{Fore.GREEN}✅ Updated notification ID {notif_id}!{Style.RESET_ALL}")
 
 def send_notifications():
-    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    now = datetime.now().replace(second=0, microsecond=0)
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute("SELECT * FROM notifications WHERE due_time <= ? AND sent = 0", (now,))
-    pending = c.fetchall()
+    c.execute("SELECT * FROM notifications WHERE sent = 0")
+    all_unsent = c.fetchall()
+
+    # Use proper datetime comparison — avoids string-format edge cases
+    pending = []
+    for row in all_unsent:
+        due_dt = _parse_due_time(row[2])
+        if due_dt is not None and due_dt <= now:
+            pending.append(row)
 
     if not pending:
-        print(f"{Fore.YELLOW}⚠️  No pending notifications to send.{Style.RESET_ALL}")
         conn.close()
         return
 
@@ -731,7 +750,7 @@ def _get_app_version() -> str:
         vm.setup_database()
         return vm.get_current_version()
     except Exception:
-        return "1.0.35"
+        return "1.0.36"
 
 
 # ==================== MAIN ====================

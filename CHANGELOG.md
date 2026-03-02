@@ -5,7 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [v1.0.35] - 2026-03-01  *(Latest)*
+## [v1.0.36] - 2026-03-01  *(Latest)*
+
+### Added
+
+- Fixed notification scheduling logic — added _parse_due_time() helper; add_notification and edit_notification now normalize due_time to zero-padded YYYY-MM-DD HH:MM format and reject past dates; send_notifications uses proper datetime comparison instead of fragile string comparison
+
+## [v1.0.35] - 2026-03-01
 
 ### Added
 
