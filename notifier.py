@@ -628,8 +628,13 @@ def system_menu():
         return
 
     while True:
+        ver = vm.get_current_version()
+        ver_str = f"v{ver}"
+        lpad = (39 - len(ver_str)) // 2
+        rpad = 39 - len(ver_str) - lpad
         print(f"\n{Fore.CYAN}╔═══════════════════════════════════════╗{Style.RESET_ALL}")
         print(f"{Fore.CYAN}║       ⚙️  SYSTEM                      ║{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}║{' ' * lpad}{ver_str}{' ' * rpad}║{Style.RESET_ALL}")
         print(f"{Fore.CYAN}╚═══════════════════════════════════════╝{Style.RESET_ALL}")
         print(f"{Fore.WHITE}1. 📜 View Version History{Style.RESET_ALL}")
         print(f"{Fore.WHITE}2. ➕ Add New Version Release{Style.RESET_ALL}")
@@ -653,6 +658,17 @@ def system_menu():
         else:
             print(f"{Fore.RED}❌ Invalid choice. Please try again.{Style.RESET_ALL}")
 
+# ==================== VERSION HELPER ====================
+def _get_app_version() -> str:
+    """Read the current version from version_notes.db; fall back to hardcoded."""
+    try:
+        import version_manager as vm
+        vm.setup_database()
+        return vm.get_current_version()
+    except Exception:
+        return "1.0.32"
+
+
 # ==================== MAIN ====================
 def main():
     init_db()
@@ -668,14 +684,20 @@ def main():
     scheduler_thread = threading.Thread(target=background_runner, daemon=True)
     scheduler_thread.start()
 
+    ver = _get_app_version()
     print(f"{Fore.CYAN}{'='*70}{Style.RESET_ALL}")
-    print(f"{Fore.CYAN}🚨 Notification App v1.0.32 Started!{Style.RESET_ALL}")
+    print(f"{Fore.CYAN}🚨 Notification App v{ver} Started!{Style.RESET_ALL}")
     print(f"{Fore.CYAN}🔄 Background scheduler is running...{Style.RESET_ALL}")
     print(f"{Fore.CYAN}{'='*70}{Style.RESET_ALL}\n")
 
     while True:
+        ver = _get_app_version()
+        ver_str = f"v{ver}"
+        lpad = (39 - len(ver_str)) // 2
+        rpad = 39 - len(ver_str) - lpad
         print(f"\n{Fore.WHITE}╔═══════════════════════════════════════╗{Style.RESET_ALL}")
         print(f"{Fore.WHITE}║       📋 NOTIFICATION MENU            ║{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}║{' ' * lpad}{ver_str}{' ' * rpad}║{Style.RESET_ALL}")
         print(f"{Fore.WHITE}╚═══════════════════════════════════════╝{Style.RESET_ALL}")
         print(f"{Fore.WHITE}1. ➕ Add Notification{Style.RESET_ALL}")
         print(f"{Fore.WHITE}2. 📋 View Notifications{Style.RESET_ALL}")
@@ -683,7 +705,7 @@ def main():
         print(f"{Fore.WHITE}4. ✏️  Edit Notification{Style.RESET_ALL}")
         print(f"{Fore.WHITE}5. 🗑️  Delete Notification{Style.RESET_ALL}")
         print(f"{Fore.WHITE}6. 📬 Notification Services{Style.RESET_ALL}")
-        print(f"{Fore.WHITE}7. ⚙️  System{Style.RESET_ALL}")
+        print(f"{Fore.WHITE}7. ⚙️  System  {Fore.CYAN}[{ver_str}]{Style.RESET_ALL}")
         print(f"{Fore.WHITE}0. 🚪 Exit{Style.RESET_ALL}")
         print(f"{Fore.WHITE}{'─'*43}{Style.RESET_ALL}")
 

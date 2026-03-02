@@ -58,6 +58,53 @@ def setup_database():
         ''')
         conn.commit()
     logging.info("Database initialised with 'releases' table.")
+    seed_initial_versions()
+
+
+# ---------------------------------------------------------------------------
+# Seed data — pre-populates history on first run
+# ---------------------------------------------------------------------------
+
+SEED_VERSIONS = [
+    ("001", "1.0.0",
+     "Initial release — Telegram notifications, SQLite scheduler, background thread, CRUD menu, colorama UI, plyer desktop support",
+     "2025-06-01 12:00:00"),
+    ("002", "1.0.10",
+     "Added Discord webhook integration and Gmail SMTP support with app-password instructions",
+     "2025-08-22 09:00:00"),
+    ("003", "1.0.20",
+     "Added Pushover integration, unified notification services menu, show_complete_env_example helper, per-service status indicators",
+     "2025-10-09 14:00:00"),
+    ("004", "1.0.31",
+     "Fixed desktop notification crash when plyer notify is not callable; changed scheduler failure to warning instead of crash",
+     "2025-12-14 11:00:00"),
+    ("005", "1.0.32",
+     "Added version_manager.py integration, System menu (option 7) with version history; renamed entry point to notifier.py; added README, requirements.txt, .gitignore, CHANGELOG.md",
+     "2026-03-01 20:38:00"),
+]
+
+
+def seed_initial_versions():
+    """Populate the DB with version history on first run (skips if already seeded)."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM releases")
+        if cursor.fetchone()[0] > 0:
+            return
+        cursor.executemany(
+            "INSERT OR IGNORE INTO releases (id, version_number, notes, timestamp) "
+            "VALUES (?, ?, ?, ?)",
+            SEED_VERSIONS
+        )
+        conn.commit()
+    logging.info("Seeded %d initial versions into the database.", len(SEED_VERSIONS))
+    update_changelog()
+
+
+def get_current_version() -> str:
+    """Return the latest version string from the DB, or '1.0.32' as fallback."""
+    latest = get_latest_version_data()
+    return latest[1] if latest else "1.0.32"
 
 
 def get_latest_version_data():
@@ -171,9 +218,10 @@ def update_changelog():
                 logging.info("CHANGELOG.md generated — no releases yet.")
                 return
 
-            for rel_id, version, notes, ts in releases:
+            for i, (rel_id, version, notes, ts) in enumerate(releases):
                 date_str = ts[:10] if ts else 'unknown'
-                f.write(f"## [{version}] - {date_str}\n\n")
+                latest_tag = "  *(Latest)*" if i == 0 else ""
+                f.write(f"## [{version}] - {date_str}{latest_tag}\n\n")
 
                 if not notes or not notes.strip():
                     f.write("No release notes provided.\n\n")
