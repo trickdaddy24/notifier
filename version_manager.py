@@ -81,30 +81,54 @@ SEED_VERSIONS = [
     ("005", "1.0.32",
      "Added version_manager.py integration, System menu (option 7) with version history; renamed entry point to notifier.py; added README, requirements.txt, .gitignore, CHANGELOG.md",
      "2026-03-01 20:38:00"),
+    ("006", "1.0.33",
+     "Fixed CHANGELOG.md version headers to include v prefix (eg. [v1.0.33] instead of [1.0.33])",
+     "2026-03-01 21:00:00"),
+    ("007", "1.0.34",
+     "Added interactive Set Credentials option (option 2) to all service menus — Telegram, Discord, Pushover, Gmail. Saves tokens directly to .env via dotenv.set_key, updates running session immediately, Gmail password hidden via getpass",
+     "2026-03-01 22:00:00"),
+    ("008", "1.0.35",
+     "Added install.sh one-liner installer for Ubuntu/Linux — auto-installs Python, git, libnotify, venv, deps, generates starter .env, creates plex-notifier system launcher. Updated README Linux section",
+     "2026-03-01 23:00:00"),
+    ("009", "1.0.36",
+     "Fixed notification scheduling fires immediately bug — added _parse_due_time helper, normalize due_time to zero-padded format on save, reject past dates, use datetime comparison instead of string comparison in send_notifications",
+     "2026-03-01 23:30:00"),
+    ("010", "1.0.37",
+     "Fixed install.sh update merge conflict — replaced git pull with git fetch origin and git reset --hard origin/main",
+     "2026-03-01 23:45:00"),
+    ("011", "1.0.38",
+     "Improved past-date error message to show entered time and current time so users understand why the due time was rejected",
+     "2026-03-02 00:00:00"),
+    ("012", "1.0.39",
+     "Fixed version showing v1.0.32 — seed_initial_versions now always INSERT OR IGNORE so new versions are picked up on update. Added Check for Updates option to System menu with auto-update via git",
+     "2026-03-02 00:30:00"),
 ]
 
 
 def seed_initial_versions():
-    """Populate the DB with version history on first run (skips if already seeded)."""
+    """Insert any missing seed versions (INSERT OR IGNORE — safe to run on every startup)."""
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT COUNT(*) FROM releases")
-        if cursor.fetchone()[0] > 0:
-            return
+        before = cursor.fetchone()[0]
         cursor.executemany(
             "INSERT OR IGNORE INTO releases (id, version_number, notes, timestamp) "
             "VALUES (?, ?, ?, ?)",
             SEED_VERSIONS
         )
         conn.commit()
-    logging.info("Seeded %d initial versions into the database.", len(SEED_VERSIONS))
-    update_changelog()
+        cursor.execute("SELECT COUNT(*) FROM releases")
+        after = cursor.fetchone()[0]
+    added = after - before
+    if added > 0:
+        logging.info("Seeded %d new version(s) into the database.", added)
+        update_changelog()
 
 
 def get_current_version() -> str:
-    """Return the latest version string from the DB, or '1.0.32' as fallback."""
+    """Return the latest version string from the DB, or '1.0.39' as fallback."""
     latest = get_latest_version_data()
-    return latest[1] if latest else "1.0.32"
+    return latest[1] if latest else "1.0.39"
 
 
 def get_latest_version_data():

@@ -702,6 +702,56 @@ def background_runner():
         schedule.run_pending()
         time.sleep(60)
 
+# ==================== UPDATE ====================
+def _version_tuple(v):
+    try:
+        return tuple(int(x) for x in v.split('.'))
+    except Exception:
+        return (0, 0, 0)
+
+def check_for_updates():
+    """Fetch the latest version string from GitHub CHANGELOG.md."""
+    import urllib.request
+    import re
+    try:
+        url = "https://raw.githubusercontent.com/trickdaddy24/plex-notifier/main/CHANGELOG.md"
+        with urllib.request.urlopen(url, timeout=10) as resp:
+            content = resp.read().decode('utf-8')
+        match = re.search(r'## \[v([0-9]+\.[0-9]+\.[0-9]+)\]', content)
+        if match:
+            return match.group(1)
+    except Exception:
+        pass
+    return None
+
+def do_update():
+    """Pull latest code via git and reinstall dependencies."""
+    import subprocess
+    import sys
+    script_dir = Path(__file__).parent
+
+    print(f"{Fore.CYAN}📦 Fetching latest code...{Style.RESET_ALL}")
+    try:
+        subprocess.run(["git", "-C", str(script_dir), "fetch", "origin"], check=True)
+        subprocess.run(["git", "-C", str(script_dir), "reset", "--hard", "origin/main"], check=True)
+    except subprocess.CalledProcessError as e:
+        print(f"{Fore.RED}❌ Git update failed: {e}{Style.RESET_ALL}")
+        return False
+
+    print(f"{Fore.CYAN}📦 Reinstalling dependencies...{Style.RESET_ALL}")
+    try:
+        subprocess.run(
+            [sys.executable, "-m", "pip", "install", "-r",
+             str(script_dir / "requirements.txt"), "-q"],
+            check=True
+        )
+    except subprocess.CalledProcessError as e:
+        print(f"{Fore.RED}❌ Dependency install failed: {e}{Style.RESET_ALL}")
+        return False
+
+    print(f"{Fore.GREEN}✅ Update complete! Please restart the app to apply changes.{Style.RESET_ALL}")
+    return True
+
 # ==================== SYSTEM MENU ====================
 def system_menu():
     """System menu — version history powered by version_manager.py"""
@@ -726,6 +776,7 @@ def system_menu():
         print(f"{Fore.WHITE}1. 📜 View Version History{Style.RESET_ALL}")
         print(f"{Fore.WHITE}2. ➕ Add New Version Release{Style.RESET_ALL}")
         print(f"{Fore.WHITE}3. ✏️  Edit Version Notes{Style.RESET_ALL}")
+        print(f"{Fore.WHITE}4. 🔄 Check for Updates{Style.RESET_ALL}")
         print(f"{Fore.WHITE}0. ⬅️  Back to Main Menu{Style.RESET_ALL}")
         print(f"{Fore.WHITE}{'─'*43}{Style.RESET_ALL}")
 
@@ -740,6 +791,25 @@ def system_menu():
         elif choice == "3":
             vm.edit_notes()
             input(f"\n{Fore.YELLOW}Press Enter to continue...{Style.RESET_ALL}")
+        elif choice == "4":
+            current = vm.get_current_version()
+            print(f"\n{Fore.CYAN}🔍 Checking for updates...{Style.RESET_ALL}")
+            print(f"{Fore.WHITE}Current version: v{current}{Style.RESET_ALL}")
+            latest = check_for_updates()
+            if latest is None:
+                print(f"{Fore.RED}❌ Could not reach GitHub. Check your connection.{Style.RESET_ALL}")
+            elif _version_tuple(latest) <= _version_tuple(current):
+                print(f"{Fore.WHITE}Latest version:  v{latest}{Style.RESET_ALL}")
+                print(f"{Fore.GREEN}✅ Already up to date!{Style.RESET_ALL}")
+            else:
+                print(f"{Fore.YELLOW}Latest version:  v{latest}{Style.RESET_ALL}")
+                print(f"{Fore.YELLOW}🆕 Update available: v{current} → v{latest}{Style.RESET_ALL}")
+                confirm = input(f"{Fore.YELLOW}Update now? (y/N): {Style.RESET_ALL}").strip().lower()
+                if confirm == 'y':
+                    do_update()
+                else:
+                    print(f"{Fore.YELLOW}Update skipped.{Style.RESET_ALL}")
+            input(f"\n{Fore.YELLOW}Press Enter to continue...{Style.RESET_ALL}")
         elif choice == "0":
             break
         else:
@@ -753,7 +823,7 @@ def _get_app_version() -> str:
         vm.setup_database()
         return vm.get_current_version()
     except Exception:
-        return "1.0.38"
+        return "1.0.39"
 
 
 # ==================== MAIN ====================
