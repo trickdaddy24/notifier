@@ -541,8 +541,10 @@ def add_notification():
         print(f"{Fore.RED}❌ Invalid date format! Use YYYY-MM-DD HH:MM{Style.RESET_ALL}")
         return
 
-    if due_dt <= datetime.now():
-        print(f"{Fore.RED}❌ Due time must be in the future!{Style.RESET_ALL}")
+    now = datetime.now()
+    if due_dt <= now:
+        print(f"{Fore.RED}❌ {due_dt.strftime('%Y-%m-%d %H:%M')} is in the past!{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}   Current time: {now.strftime('%Y-%m-%d %H:%M')} — enter a future date/time.{Style.RESET_ALL}")
         return
 
     # Normalize to zero-padded format so string comparison in the DB is reliable
@@ -628,7 +630,8 @@ def edit_notification():
             print(f"{Fore.RED}❌ Invalid format! Keeping original.{Style.RESET_ALL}")
             new_due = row[2]
         elif due_dt <= datetime.now():
-            print(f"{Fore.RED}❌ Due time must be in the future! Keeping original.{Style.RESET_ALL}")
+            print(f"{Fore.RED}❌ {due_dt.strftime('%Y-%m-%d %H:%M')} is in the past! Keeping original.{Style.RESET_ALL}")
+            print(f"{Fore.YELLOW}   Current time: {datetime.now().strftime('%Y-%m-%d %H:%M')}{Style.RESET_ALL}")
             new_due = row[2]
         else:
             new_due = due_dt.strftime("%Y-%m-%d %H:%M")
@@ -750,7 +753,7 @@ def _get_app_version() -> str:
         vm.setup_database()
         return vm.get_current_version()
     except Exception:
-        return "1.0.37"
+        return "1.0.38"
 
 
 # ==================== MAIN ====================
