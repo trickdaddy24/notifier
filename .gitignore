@@ -9,6 +9,10 @@ version_notes.db
 # Logs
 *.log
 version_management.log
+multi_channel_notifier*.log
+
+# Exports
+notifications_export_*.json
 
 # Python
 __pycache__/

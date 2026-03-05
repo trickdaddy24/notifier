@@ -56,6 +56,13 @@ if ! command -v notify-send &>/dev/null; then
 fi
 echo "✅ libnotify found"
 
+# ── python3-tk (Tkinter GUI — optional) ───────────────────────
+if ! python3 -c "import tkinter" &>/dev/null 2>&1; then
+    echo "📦 Installing python3-tk for optional Tkinter GUI..."
+    sudo apt-get install -y python3-tk
+fi
+echo "✅ tkinter found"
+
 # ── Clone or update ────────────────────────────────────────────
 echo ""
 if [ -d "$INSTALL_DIR/.git" ]; then
@@ -106,6 +113,9 @@ EMAIL_RECIPIENT=
 # Timezone (optional — leave blank to use server local time)
 # Examples: America/New_York  America/Chicago  America/Los_Angeles  Europe/London
 TIMEZONE=
+
+# Heartbeat interval in hours (0 = disabled)
+HEARTBEAT_INTERVAL=0
 ENVFILE
     echo "✅ .env created at $INSTALL_DIR/.env"
     echo "   Tip: You can set credentials from inside the app (option 6 → service → option 2)"
@@ -142,9 +152,10 @@ echo "  cd $INSTALL_DIR && source .venv/bin/activate && python notifier.py"
 echo ""
 echo "First-time setup:"
 echo "  1. Run: notifier"
-echo "  2. Go to option 6 — Notification Services"
-echo "  3. Choose a service and select option 2 — Set Credentials"
-echo "  4. Enter your tokens/keys — saved automatically to .env"
+echo "  2. Go to option 6  — Notification Services → pick a service → option 2 (Set Credentials)"
+echo "  3. Go to option 11 — System → option 5 (Set Timezone) if needed"
+echo "  4. Go to option 11 — System → option 6 (Heartbeat) to enable periodic pings"
+echo "  5. Go to option 10 — Open GUI (Tkinter) for a graphical view of your reminders"
 echo ""
 echo "⚠️  If 'notifier' command is not found after install, run:"
 echo "   source ~/.bashrc"

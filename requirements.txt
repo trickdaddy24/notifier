@@ -1,6 +1,9 @@
+# Notifier v2.0.0 — pip dependencies
+# All other modules (logging, json, platform, socket, tkinter, contextlib, etc.) are stdlib.
+
 colorama>=0.4.6
 python-dotenv>=1.0.0
 requests>=2.31.0
 schedule>=1.2.0
 plyer>=2.1.0
-tzdata>=2024.1
+tzdata>=2024.1        # Windows / environments without system tz data (zoneinfo)
