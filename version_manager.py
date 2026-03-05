@@ -117,6 +117,9 @@ SEED_VERSIONS = [
     ("017", "2.0.0",
      "Major merge release — added logging module with 5MB rotation, db_log audit trail, logs DB table with indexes, due_ts epoch column, recurrence system (daily/weekly/biweekly replacing repeat_time), show_logs() last-100 viewer, export/import JSON, Tkinter GUI (optional), masked() credential display, get_db() WAL context manager, enriched heartbeat with hostname/IP/Python version, send_admin_notification() startup/shutdown alert, send_notifications() epoch-based with ge-1-success logic, 11-option main menu",
      "2026-03-04 00:00:00"),
+    ("018", "2.0.1",
+     "Fixed Pylance type errors — removed unused Back and random imports, moved tkinter imports into launch_tkinter_gui() as lazy import (eliminates tk=None false positives), replaced notification.notify() direct calls with captured _notify callable pattern",
+     "2026-03-04 12:00:00"),
 ]
 
 
@@ -143,7 +146,7 @@ def seed_initial_versions():
 def get_current_version() -> str:
     """Return the latest version string from the DB, or '1.0.39' as fallback."""
     latest = get_latest_version_data()
-    return latest[1] if latest else "2.0.0"
+    return latest[1] if latest else "2.0.1"
 
 
 def get_latest_version_data():

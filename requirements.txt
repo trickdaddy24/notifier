@@ -1,4 +1,4 @@
-# Notifier v2.0.0 — pip dependencies
+# Notifier v2.0.1 — pip dependencies
 # All other modules (logging, json, platform, socket, tkinter, contextlib, etc.) are stdlib.
 
 colorama>=0.4.6

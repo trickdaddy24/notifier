@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# notifier.py — Notification App v2.0.0
+# notifier.py — Notification App v2.0.1
 
 import sqlite3
 import time
@@ -1243,7 +1243,7 @@ def launch_tkinter_gui():
             refresh_listbox()
 
     root = tk.Tk()
-    root.title("Notifier GUI — v2.0.0")
+    root.title("Notifier GUI — v2.0.1")
     root.geometry("720x460")
     tk.Label(root, text="Reminders", font=("Arial", 14, "bold")).pack(pady=8)
     listbox = tk.Listbox(root, width=95, height=18)
