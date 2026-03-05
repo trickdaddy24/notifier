@@ -10,12 +10,11 @@ import logging
 import json
 import platform
 import socket
-import random
 from contextlib import contextmanager
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
-from colorama import init, Fore, Back, Style
+from colorama import init, Fore, Style
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import schedule
 import requests
@@ -23,11 +22,9 @@ from dotenv import load_dotenv, set_key
 from pathlib import Path
 
 try:
-    import tkinter as tk
-    from tkinter import ttk, messagebox
+    import tkinter as _tk_check  # noqa: F401
     TKINTER_AVAILABLE = True
 except ImportError:
-    tk = None
     TKINTER_AVAILABLE = False
 
 try:
@@ -409,9 +406,10 @@ def send_heartbeat():
     print(f"{Fore.MAGENTA}💓 Sending heartbeat...{Style.RESET_ALL}")
     logging.info("Heartbeat: %s", msg)
 
-    if NOTIFICATIONS_AVAILABLE and callable(getattr(notification, "notify", None)):
+    _notify = getattr(notification, "notify", None) if notification is not None else None
+    if NOTIFICATIONS_AVAILABLE and callable(_notify):
         try:
-            notification.notify(title="💓 Heartbeat", message="Notifier is running", timeout=5)
+            _notify(title="💓 Heartbeat", message="Notifier is running", timeout=5)
         except Exception:
             pass
 
@@ -1002,9 +1000,10 @@ def send_notifications(verbose=False):
             print(f"{Fore.GREEN}{Style.BRIGHT}📢 Sending: {msg}{Style.RESET_ALL}")
 
             # Desktop notification
-            if NOTIFICATIONS_AVAILABLE and callable(getattr(notification, "notify", None)):
+            _notify = getattr(notification, "notify", None) if notification is not None else None
+            if NOTIFICATIONS_AVAILABLE and callable(_notify):
                 try:
-                    notification.notify(title="⏰ Reminder!", message=msg, timeout=10)
+                    _notify(title="⏰ Reminder!", message=msg, timeout=10)
                 except Exception:
                     pass
 
@@ -1167,6 +1166,9 @@ def launch_tkinter_gui():
     if not TKINTER_AVAILABLE:
         print(f"{Fore.RED}❌ tkinter is not available on this system.{Style.RESET_ALL}")
         return
+
+    import tkinter as tk
+    from tkinter import ttk, messagebox
 
     def refresh_listbox():
         listbox.delete(0, tk.END)
