@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# notifier.py — Notification App v2.0.4
+# notifier.py — Notification App v2.0.5
 
 import calendar
 import sqlite3
@@ -1272,7 +1272,7 @@ def launch_tkinter_gui():
             refresh_listbox()
 
     root = tk.Tk()
-    root.title("Notifier GUI — v2.0.4")
+    root.title("Notifier GUI — v2.0.5")
     root.geometry("720x460")
     tk.Label(root, text="Reminders", font=("Arial", 14, "bold")).pack(pady=8)
     listbox = tk.Listbox(root, width=95, height=18)
@@ -1341,33 +1341,42 @@ def do_update():
 # ── System menu ────────────────────────────────────────────────────────────────
 
 def show_about(vm):
-    """Display the About screen in script-header format."""
+    """Display the About screen in script-header format, evenly bordered."""
     version, revised = vm.get_latest_release_info()
 
-    W  = Fore.WHITE + Style.BRIGHT
-    D  = Fore.WHITE + Style.DIM
-    C  = Fore.CYAN  + Style.BRIGHT
-    R  = Style.RESET_ALL
+    W = Fore.WHITE + Style.BRIGHT
+    D = Fore.WHITE + Style.DIM
+    C = Fore.CYAN  + Style.BRIGHT
+    R = Style.RESET_ALL
 
-    BORDER = f"{C}{'#' * 73}{R}"
+    # Box geometry (all measurements are visible character counts)
+    BOX_W   = 73   # total width: matches the ##### border
+    INNER_W = BOX_W - 2   # 71 — content between the two # chars
+    INDENT  = 2            # spaces between opening # and label
+    LABEL_W = 16           # label field width (label text padded to 16)
+    # value field = 71 - 2 - 16 = 53 visible chars max per line
+
+    border = '#' * BOX_W
+
     def _row(label, value):
-        # fixed-width: label col = 16 chars, value col fills to col 71
-        inner = f"# {label:<16}{value}"
-        pad   = 71 - len(f"# {label:<16}{value}")
-        print(f"  {C}#{R}  {W}{label:<14}{R}  {D}{value}{R}{' ' * max(pad, 0)}  {C}#{R}")
+        label_padded = f"{label:<{LABEL_W}}"          # always exactly LABEL_W visible chars
+        inner_vis    = ' ' * INDENT + label_padded + value
+        pad          = max(INNER_W - len(inner_vis), 0)
+        lc           = W if label else ''
+        print(f"  {C}#{R}{' ' * INDENT}{lc}{label_padded}{R}{D}{value}{R}{' ' * pad}{C}#{R}")
 
-    print(f"\n  {BORDER}")
+    print(f"\n  {C}{border}{R}")
     _row("Title:",       "Notifier")
     _row("Author(s):",   "Stunna / Claude")
     _row("Revised:",     revised)
     _row("Description:", "Multi-platform CLI notification scheduler — Telegram,")
-    _row("",             "Discord, Pushover, Gmail — SQLite backend, recurrence,")
-    _row("",             "audit logging, JSON import/export, optional Tkinter GUI")
+    _row("",             "Discord, Pushover, Gmail — SQLite, recurrence,")
+    _row("",             "audit logging, JSON import/export, Tkinter GUI")
     _row("Version:",     f"v{version}")
     _row("Entry Point:", "notifier.py")
     _row("License:",     "MIT")
     _row("GitHub:",      "https://github.com/trickdaddy24/notifier")
-    print(f"  {BORDER}")
+    print(f"  {C}{border}{R}")
 
 
 def system_menu():

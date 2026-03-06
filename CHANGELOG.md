@@ -5,7 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [v2.0.4] - 2026-03-05  *(Latest)*
+## [v2.0.5] - 2026-03-05  *(Latest)*
+
+### Fixed
+
+- Fixed About box alignment — each row is now exactly 73 visible chars with `#` flush on both sides; rewrote `_row()` to calculate padding from the plain-text inner length before applying colorama ANSI codes, eliminating escape-sequence interference with string padding
+
+## [v2.0.4] - 2026-03-05
 
 ### Added
 

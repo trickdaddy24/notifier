@@ -129,6 +129,9 @@ SEED_VERSIONS = [
     ("021", "2.0.4",
      "Added About screen to System menu option 7 — shows Title, Author(s), Revised date, Description, Version, Entry Point, License, and GitHub URL; Version and Revised date are pulled live from version_notes.db via get_latest_release_info() so they auto-update with every version bump",
      "2026-03-05 02:00:00"),
+    ("022", "2.0.5",
+     "Fixed About box alignment — each row is now exactly 73 visible chars with # on both sides; rewrote _row() to compute visible inner length before adding color codes, eliminating ANSI escape sequence interference with padding calculation",
+     "2026-03-05 03:00:00"),
 ]
 
 
@@ -155,7 +158,7 @@ def seed_initial_versions():
 def get_current_version() -> str:
     """Return the latest version string from the DB, or '1.0.39' as fallback."""
     latest = get_latest_version_data()
-    return latest[1] if latest else "2.0.4"
+    return latest[1] if latest else "2.0.5"
 
 
 def get_latest_version_data():
