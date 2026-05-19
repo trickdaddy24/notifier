@@ -14,6 +14,9 @@ multi_channel_notifier*.log
 # Exports
 notifications_export_*.json
 
+# Pre-update safety backups
+backups/
+
 # Python
 __pycache__/
 *.py[cod]

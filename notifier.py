@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# notifier.py — Notification App v2.0.6
+# notifier.py — Notification App v2.1.0
 
 import calendar
 import random
@@ -43,6 +43,16 @@ if NOTIFICATIONS_AVAILABLE and sys.platform.startswith("linux"):
     if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
         NOTIFICATIONS_AVAILABLE = False
 
+# ── Console encoding guard ────────────────────────────────────────────────────
+# Emoji + box-drawing glyphs crash on a non-UTF-8 stdout (Windows cp1252 when
+# output is piped or run head-less under Task Scheduler). Force UTF-8 and
+# degrade gracefully instead of taking the daemon down on a stray glyph.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 # ── File logging setup (5 MB rotation) ────────────────────────────────────────
 
 LOG_FILE = "multi_channel_notifier.log"
@@ -56,6 +66,7 @@ logging.basicConfig(
     filename=LOG_FILE,
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
+    encoding="utf-8",
 )
 
 init(autoreset=False)  # Colorama — we manage reset manually
@@ -131,7 +142,7 @@ def init_db():
             dt = _parse_due_time(due_str)
             if dt:
                 c.execute("UPDATE notifications SET due_ts = ? WHERE id = ?",
-                          (int(dt.timestamp()), row_id))
+                          (_to_ts(dt), row_id))
 
         conn.commit()
 
@@ -169,6 +180,18 @@ def masked(val):
         return "******"
     return val[:3] + "..." + val[-3:]
 
+
+# When the background scheduler fires a send, its stdout would scramble the
+# interactive menu the user is sitting in. _QUIET suppresses sender chatter
+# during scheduled runs; everything still goes to the log + audit DB.
+_QUIET = False
+
+
+def _cprint(*args, **kwargs):
+    """print() that is silenced while the scheduler thread is running a job."""
+    if not _QUIET:
+        print(*args, **kwargs)
+
 # ── Timezone helpers ───────────────────────────────────────────────────────────
 
 def _get_user_tz():
@@ -195,6 +218,49 @@ def _tz_label() -> str:
     """Short timezone label for display."""
     tz_name = os.getenv('TIMEZONE', '').strip()
     return tz_name if tz_name else "system local"
+
+
+def _to_ts(dt: datetime) -> int:
+    """Epoch seconds for a *naive* wall-clock datetime, interpreted in the
+    configured TIMEZONE (or system local if unset).
+
+    A bare ``datetime.timestamp()`` assumes the machine's local zone, which is
+    wrong whenever TIMEZONE differs from the host clock (e.g. a UTC server).
+    All scheduling math must go through this helper.
+    """
+    tz = _get_user_tz()
+    if tz is None:
+        return int(dt.timestamp())
+    return int(dt.replace(tzinfo=tz).timestamp())
+
+
+def _from_ts(ts: int) -> datetime:
+    """Inverse of _to_ts: naive wall-clock datetime in the configured TIMEZONE."""
+    tz = _get_user_tz()
+    if tz is None:
+        return datetime.fromtimestamp(ts)
+    return datetime.fromtimestamp(ts, tz).replace(tzinfo=None)
+
+
+def _relative_due(due_ts: int) -> str:
+    """Human 'in 3h 12m' / 'overdue 5h' / 'due now' from an absolute epoch."""
+    if not due_ts:
+        return ""
+    delta = int(due_ts) - int(time.time())
+    overdue = delta < 0
+    secs = abs(delta)
+    if secs < 60:
+        return "due now"
+    d, rem = divmod(secs, 86400)
+    h, rem = divmod(rem, 3600)
+    m, _ = divmod(rem, 60)
+    if d:
+        body = f"{d}d {h}h" if h else f"{d}d"
+    elif h:
+        body = f"{h}h {m}m" if m else f"{h}h"
+    else:
+        body = f"{m}m"
+    return f"overdue {body}" if overdue else f"in {body}"
 
 # ── Date / recurrence helpers ──────────────────────────────────────────────────
 
@@ -239,14 +305,14 @@ def _next_recurrence_ts(due_ts, recurrence, repeat_time=None):
 
     if recurrence == "daily" and repeat_time:
         next_dt = _next_daily_time(repeat_time)
-        return int(next_dt.timestamp()) if next_dt else None
+        return _to_ts(next_dt) if next_dt else None
 
     if recurrence == "monthly":
-        next_dt = _next_month_dt(datetime.fromtimestamp(due_ts))
-        next_ts = int(next_dt.timestamp())
+        next_dt = _next_month_dt(_from_ts(due_ts))
+        next_ts = _to_ts(next_dt)
         while next_ts <= now_ts:
             next_dt = _next_month_dt(next_dt)
-            next_ts = int(next_dt.timestamp())
+            next_ts = _to_ts(next_dt)
         return next_ts
 
     steps = {"daily": 86400, "weekly": 604800, "biweekly": 1209600}
@@ -288,12 +354,12 @@ def send_telegram_message(message):
     try:
         r = requests.post(url, json={"chat_id": chat_id, "text": message}, timeout=10)
         if r.status_code == 200:
-            print(f"{Fore.GREEN}✅ Telegram message sent!{Style.RESET_ALL}")
+            _cprint(f"{Fore.GREEN}✅ Telegram message sent!{Style.RESET_ALL}")
             return True, f"HTTP {r.status_code}"
-        print(f"{Fore.RED}❌ Telegram API error: {r.status_code}{Style.RESET_ALL}")
+        _cprint(f"{Fore.RED}❌ Telegram API error: {r.status_code}{Style.RESET_ALL}")
         return False, f"HTTP {r.status_code} - {r.text}"
     except requests.exceptions.RequestException as e:
-        print(f"{Fore.RED}❌ Failed to send Telegram: {e}{Style.RESET_ALL}")
+        _cprint(f"{Fore.RED}❌ Failed to send Telegram: {e}{Style.RESET_ALL}")
         return False, str(e)
 
 
@@ -304,12 +370,12 @@ def send_discord_message(message):
     try:
         r = requests.post(webhook_url, json={"content": message}, timeout=10)
         if r.status_code in (200, 204):
-            print(f"{Fore.GREEN}✅ Discord message sent!{Style.RESET_ALL}")
+            _cprint(f"{Fore.GREEN}✅ Discord message sent!{Style.RESET_ALL}")
             return True, f"HTTP {r.status_code}"
-        print(f"{Fore.RED}❌ Discord API error: {r.status_code}{Style.RESET_ALL}")
+        _cprint(f"{Fore.RED}❌ Discord API error: {r.status_code}{Style.RESET_ALL}")
         return False, f"HTTP {r.status_code} - {r.text}"
     except requests.exceptions.RequestException as e:
-        print(f"{Fore.RED}❌ Failed to send Discord: {e}{Style.RESET_ALL}")
+        _cprint(f"{Fore.RED}❌ Failed to send Discord: {e}{Style.RESET_ALL}")
         return False, str(e)
 
 
@@ -322,12 +388,12 @@ def send_pushover_message(message):
     try:
         r = requests.post(url, data={"token": api_token, "user": user_key, "message": message}, timeout=10)
         if r.status_code == 200:
-            print(f"{Fore.GREEN}✅ Pushover message sent!{Style.RESET_ALL}")
+            _cprint(f"{Fore.GREEN}✅ Pushover message sent!{Style.RESET_ALL}")
             return True, f"HTTP {r.status_code}"
-        print(f"{Fore.RED}❌ Pushover API error: {r.status_code}{Style.RESET_ALL}")
+        _cprint(f"{Fore.RED}❌ Pushover API error: {r.status_code}{Style.RESET_ALL}")
         return False, f"HTTP {r.status_code} - {r.text}"
     except requests.exceptions.RequestException as e:
-        print(f"{Fore.RED}❌ Failed to send Pushover: {e}{Style.RESET_ALL}")
+        _cprint(f"{Fore.RED}❌ Failed to send Pushover: {e}{Style.RESET_ALL}")
         return False, str(e)
 
 
@@ -350,10 +416,10 @@ def send_email_message(message, subject="⏰ Notification Reminder"):
         server.login(sender, password)
         server.send_message(msg)
         server.quit()
-        print(f"{Fore.GREEN}✅ Email sent!{Style.RESET_ALL}")
+        _cprint(f"{Fore.GREEN}✅ Email sent!{Style.RESET_ALL}")
         return True, "Email sent"
     except Exception as e:
-        print(f"{Fore.RED}❌ Failed to send email: {e}{Style.RESET_ALL}")
+        _cprint(f"{Fore.RED}❌ Failed to send email: {e}{Style.RESET_ALL}")
         return False, str(e)
 
 # ── Verify functions ───────────────────────────────────────────────────────────
@@ -413,6 +479,126 @@ def verify_email_config():
     ok, _ = send_email_message("✅ Gmail verification successful!")
     return ok
 
+# ── Channel registry ───────────────────────────────────────────────────────────
+# One row per delivery channel. Adding a channel is now a data change here plus
+# a send_/verify_ pair — no more parallel menu/setter/loop copies to keep in sync.
+
+CHANNELS = [
+    {
+        "name": "telegram", "label": "Telegram", "emoji": "📱", "color": Fore.BLUE,
+        "send": send_telegram_message, "verify": verify_telegram_config,
+        "fields": [
+            {"key": "TELEGRAM_BOT_TOKEN", "prompt": "Bot Token", "secret": False, "mask": True},
+            {"key": "TELEGRAM_CHAT_ID",   "prompt": "Chat ID",   "secret": False, "mask": False},
+        ],
+        "display_extra": [],
+        "setup": [
+            "1. Message @BotFather on Telegram",
+            "2. Send /newbot and follow instructions",
+            "3. Get your bot token",
+            "4. Message @userinfobot to get your chat ID",
+            "5. Add both to .env file",
+        ],
+    },
+    {
+        "name": "discord", "label": "Discord", "emoji": "💬", "color": Fore.MAGENTA,
+        "send": send_discord_message, "verify": verify_discord_config,
+        "fields": [
+            {"key": "DISCORD_WEBHOOK_URL", "prompt": "Webhook URL", "secret": False, "mask": True},
+        ],
+        "display_extra": [],
+        "setup": [
+            "1. Go to your Discord server",
+            "2. Edit Channel → Integrations → Webhooks",
+            "3. Create New Webhook and copy the URL",
+            "4. Add DISCORD_WEBHOOK_URL to .env file",
+        ],
+    },
+    {
+        "name": "pushover", "label": "Pushover", "emoji": "📲", "color": Fore.YELLOW,
+        "send": send_pushover_message, "verify": verify_pushover_config,
+        "fields": [
+            {"key": "PUSHOVER_USER_KEY",  "prompt": "User Key",  "secret": False, "mask": True},
+            {"key": "PUSHOVER_API_TOKEN", "prompt": "API Token", "secret": False, "mask": True},
+        ],
+        "display_extra": [],
+        "setup": [
+            "1. Go to https://pushover.net",
+            "2. Create an account and note your User Key",
+            "3. Create an Application to get an API Token",
+            "4. Add both to .env file",
+        ],
+    },
+    {
+        "name": "email", "label": "Gmail", "emoji": "📧", "color": Fore.RED,
+        "send": send_email_message, "verify": verify_email_config,
+        "fields": [
+            {"key": "EMAIL_SENDER",    "prompt": "Sender Email",    "secret": False, "mask": True},
+            {"key": "EMAIL_PASSWORD",  "prompt": "App Password",    "secret": True,  "mask": True},
+            {"key": "EMAIL_RECIPIENT", "prompt": "Recipient Email", "secret": False, "mask": True},
+        ],
+        "display_extra": [("EMAIL_SMTP_SERVER", "smtp.gmail.com"), ("EMAIL_SMTP_PORT", "587")],
+        "setup": [
+            "1. Go to Google Account → Security",
+            "2. Enable 2-Step Verification",
+            "3. Go to App Passwords → Generate one for 'Mail'",
+            "4. Use that password (NOT your regular password)",
+            "5. Add all EMAIL_* variables to .env file",
+        ],
+    },
+]
+
+
+def _channel_configured(ch) -> bool:
+    """True when every required env field for this channel is set."""
+    return all(os.getenv(f["key"]) for f in ch["fields"])
+
+
+def _is_transient(resp: str) -> bool:
+    """Heuristic: is this failure worth retrying?
+
+    Retry network blips, timeouts, 5xx and 429. Do NOT retry a missing-config
+    skip or a hard 4xx (bad token / forbidden) — those won't fix themselves
+    inside a few seconds and would just delay the other channels.
+    """
+    if not resp:
+        return False
+    r = resp.lower()
+    if "missing" in r:
+        return False
+    if "http 429" in r or "http 5" in r:
+        return True
+    if "http 4" in r:                      # 4xx other than 429 → permanent
+        return False
+    # No HTTP code → transport-level error (timeout, conn reset, DNS, SMTP)
+    return True
+
+
+def _deliver(chan, message, subject=None, retries=2, backoff=1.5):
+    """Send through one channel with bounded retry on transient failures.
+
+    The single chokepoint for delivery so retry/backoff lives in exactly one
+    place. Only the email sender takes a subject; everything else ignores it.
+    Returns (ok, response) — response is from the final attempt.
+    """
+    send = chan["send"]
+
+    def _attempt():
+        if chan["name"] == "email" and subject is not None:
+            return send(message, subject=subject)
+        return send(message)
+
+    ok, resp = _attempt()
+    attempt = 1
+    while not ok and attempt <= retries and _is_transient(resp):
+        delay = backoff * attempt
+        logging.warning("Channel %s failed (%s) — retry %d/%d in %.1fs",
+                         chan["name"], resp, attempt, retries, delay)
+        time.sleep(delay)
+        ok, resp = _attempt()
+        attempt += 1
+    return ok, resp
+
 # ── Heartbeat ──────────────────────────────────────────────────────────────────
 
 def send_heartbeat():
@@ -441,25 +627,16 @@ def send_heartbeat():
             pass
 
     # Check whether any external service is configured
-    any_configured = any([
-        os.getenv('TELEGRAM_BOT_TOKEN') and os.getenv('TELEGRAM_CHAT_ID'),
-        os.getenv('DISCORD_WEBHOOK_URL'),
-        os.getenv('PUSHOVER_USER_KEY') and os.getenv('PUSHOVER_API_TOKEN'),
-        all([os.getenv('EMAIL_SENDER'), os.getenv('EMAIL_PASSWORD'), os.getenv('EMAIL_RECIPIENT')]),
-    ])
+    any_configured = any(_channel_configured(ch) for ch in CHANNELS)
 
     if not any_configured:
         db_log(None, "heartbeat", "LOGGED", "No services configured — heartbeat logged only")
         logging.info("Heartbeat logged only — no notification services configured")
         return
 
-    print(f"{Fore.MAGENTA}💓 Sending heartbeat...{Style.RESET_ALL}")
-    for fn, ch in [
-        (send_telegram_message, "telegram"),
-        (send_discord_message,  "discord"),
-        (send_pushover_message, "pushover"),
-        (send_email_message,    "email"),
-    ]:
+    _cprint(f"{Fore.MAGENTA}💓 Sending heartbeat...{Style.RESET_ALL}")
+    for chan in CHANNELS:
+        fn, ch = chan["send"], chan["name"]
         ok, resp = fn(msg)
         status = "SUCCESS" if ok else ("SKIPPED" if "Missing" in resp else "FAILED")
         db_log(None, f"heartbeat_{ch}", status, resp)
@@ -513,126 +690,35 @@ def _service_menu_options(prompt_color):
     return _prompt("Choose: ")
 
 
-def telegram_menu():
+def channel_menu(chan):
+    """Generic per-channel settings screen. Behaviour matches the old
+    telegram_menu/discord_menu/… one-to-one, driven by the registry row."""
     while True:
-        _box(Fore.BLUE, "📱 TELEGRAM SETTINGS")
-        bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
-        chat_id   = os.getenv('TELEGRAM_CHAT_ID')
-        configured = bool(bot_token and chat_id)
+        _box(chan["color"], f'{chan["emoji"]} {chan["label"].upper()} SETTINGS')
+        configured = _channel_configured(chan)
         status = (f"{Fore.GREEN}{Style.BRIGHT}✅ CONFIGURED{Style.RESET_ALL}"
                   if configured else f"{Fore.RED}❌ NOT CONFIGURED{Style.RESET_ALL}")
         print(f"  Status: {status}\n")
-        choice = _service_menu_options(Fore.BLUE)
+        choice = _service_menu_options(chan["color"])
         if choice == "1":
-            verify_telegram_config()
+            chan["verify"]()
         elif choice == "2":
-            set_telegram_credentials()
+            set_channel_credentials(chan)
         elif choice == "3":
             msg = _prompt("Test message (Enter for default): ") or "🧪 Test from Notification App!"
-            send_telegram_message(msg)
+            _deliver(chan, msg)
         elif choice == "4":
-            print(f"\n  {Fore.GREEN}TELEGRAM_BOT_TOKEN={masked(bot_token)}{Style.RESET_ALL}")
-            print(f"  {Fore.GREEN}TELEGRAM_CHAT_ID={chat_id or '(not set)'}{Style.RESET_ALL}")
+            print()
+            for key, default in chan["display_extra"]:
+                print(f"  {Fore.GREEN}{key}={os.getenv(key, default)}{Style.RESET_ALL}")
+            for f in chan["fields"]:
+                val = os.getenv(f["key"])
+                shown = masked(val) if f["mask"] else (val or "(not set)")
+                print(f"  {Fore.GREEN}{f['key']}={shown}{Style.RESET_ALL}")
         elif choice == "5":
-            print(f"\n  {Fore.CYAN}{Style.BRIGHT}📚 Telegram Setup:{Style.RESET_ALL}")
-            print(f"  1. Message @BotFather on Telegram")
-            print(f"  2. Send /newbot and follow instructions")
-            print(f"  3. Get your bot token")
-            print(f"  4. Message @userinfobot to get your chat ID")
-            print(f"  5. Add both to .env file")
-            input(f"\n  {Fore.YELLOW}Press Enter to continue...{Style.RESET_ALL}")
-        elif choice == "0":
-            break
-
-
-def discord_menu():
-    while True:
-        _box(Fore.MAGENTA, "💬 DISCORD SETTINGS")
-        webhook_url = os.getenv('DISCORD_WEBHOOK_URL')
-        status = (f"{Fore.GREEN}{Style.BRIGHT}✅ CONFIGURED{Style.RESET_ALL}"
-                  if webhook_url else f"{Fore.RED}❌ NOT CONFIGURED{Style.RESET_ALL}")
-        print(f"  Status: {status}\n")
-        choice = _service_menu_options(Fore.MAGENTA)
-        if choice == "1":
-            verify_discord_config()
-        elif choice == "2":
-            set_discord_credentials()
-        elif choice == "3":
-            msg = _prompt("Test message (Enter for default): ") or "🧪 Test from Notification App!"
-            send_discord_message(msg)
-        elif choice == "4":
-            print(f"\n  {Fore.GREEN}DISCORD_WEBHOOK_URL={masked(webhook_url)}{Style.RESET_ALL}")
-        elif choice == "5":
-            print(f"\n  {Fore.CYAN}{Style.BRIGHT}📚 Discord Setup:{Style.RESET_ALL}")
-            print(f"  1. Go to your Discord server")
-            print(f"  2. Edit Channel → Integrations → Webhooks")
-            print(f"  3. Create New Webhook and copy the URL")
-            print(f"  4. Add DISCORD_WEBHOOK_URL to .env file")
-            input(f"\n  {Fore.YELLOW}Press Enter to continue...{Style.RESET_ALL}")
-        elif choice == "0":
-            break
-
-
-def pushover_menu():
-    while True:
-        _box(Fore.YELLOW, "📲 PUSHOVER SETTINGS")
-        user_key  = os.getenv('PUSHOVER_USER_KEY')
-        api_token = os.getenv('PUSHOVER_API_TOKEN')
-        status = (f"{Fore.GREEN}{Style.BRIGHT}✅ CONFIGURED{Style.RESET_ALL}"
-                  if (user_key and api_token) else f"{Fore.RED}❌ NOT CONFIGURED{Style.RESET_ALL}")
-        print(f"  Status: {status}\n")
-        choice = _service_menu_options(Fore.YELLOW)
-        if choice == "1":
-            verify_pushover_config()
-        elif choice == "2":
-            set_pushover_credentials()
-        elif choice == "3":
-            msg = _prompt("Test message (Enter for default): ") or "🧪 Test from Notification App!"
-            send_pushover_message(msg)
-        elif choice == "4":
-            print(f"\n  {Fore.GREEN}PUSHOVER_USER_KEY={masked(user_key)}{Style.RESET_ALL}")
-            print(f"  {Fore.GREEN}PUSHOVER_API_TOKEN={masked(api_token)}{Style.RESET_ALL}")
-        elif choice == "5":
-            print(f"\n  {Fore.CYAN}{Style.BRIGHT}📚 Pushover Setup:{Style.RESET_ALL}")
-            print(f"  1. Go to https://pushover.net")
-            print(f"  2. Create an account and note your User Key")
-            print(f"  3. Create an Application to get an API Token")
-            print(f"  4. Add both to .env file")
-            input(f"\n  {Fore.YELLOW}Press Enter to continue...{Style.RESET_ALL}")
-        elif choice == "0":
-            break
-
-
-def email_menu():
-    while True:
-        _box(Fore.RED, "📧 GMAIL SETTINGS")
-        sender    = os.getenv('EMAIL_SENDER')
-        recipient = os.getenv('EMAIL_RECIPIENT')
-        password  = os.getenv('EMAIL_PASSWORD')
-        status = (f"{Fore.GREEN}{Style.BRIGHT}✅ CONFIGURED{Style.RESET_ALL}"
-                  if (sender and password and recipient) else f"{Fore.RED}❌ NOT CONFIGURED{Style.RESET_ALL}")
-        print(f"  Status: {status}\n")
-        choice = _service_menu_options(Fore.RED)
-        if choice == "1":
-            verify_email_config()
-        elif choice == "2":
-            set_email_credentials()
-        elif choice == "3":
-            msg = _prompt("Test message (Enter for default): ") or "🧪 Test from Notification App!"
-            send_email_message(msg)
-        elif choice == "4":
-            print(f"\n  {Fore.GREEN}EMAIL_SMTP_SERVER={os.getenv('EMAIL_SMTP_SERVER', 'smtp.gmail.com')}{Style.RESET_ALL}")
-            print(f"  {Fore.GREEN}EMAIL_SMTP_PORT={os.getenv('EMAIL_SMTP_PORT', '587')}{Style.RESET_ALL}")
-            print(f"  {Fore.GREEN}EMAIL_SENDER={masked(sender)}{Style.RESET_ALL}")
-            print(f"  {Fore.GREEN}EMAIL_PASSWORD={masked(password)}{Style.RESET_ALL}")
-            print(f"  {Fore.GREEN}EMAIL_RECIPIENT={masked(recipient)}{Style.RESET_ALL}")
-        elif choice == "5":
-            print(f"\n  {Fore.CYAN}{Style.BRIGHT}📚 Gmail Setup:{Style.RESET_ALL}")
-            print(f"  1. Go to Google Account → Security")
-            print(f"  2. Enable 2-Step Verification")
-            print(f"  3. Go to App Passwords → Generate one for 'Mail'")
-            print(f"  4. Use that password (NOT your regular password)")
-            print(f"  5. Add all EMAIL_* variables to .env file")
+            print(f"\n  {Fore.CYAN}{Style.BRIGHT}📚 {chan['label']} Setup:{Style.RESET_ALL}")
+            for line in chan["setup"]:
+                print(f"  {line}")
             input(f"\n  {Fore.YELLOW}Press Enter to continue...{Style.RESET_ALL}")
         elif choice == "0":
             break
@@ -641,37 +727,24 @@ def email_menu():
 def notification_services_menu():
     while True:
         _box(Fore.MAGENTA, "📬 NOTIFICATION SERVICES")
-        tg_ok = bool(os.getenv('TELEGRAM_BOT_TOKEN') and os.getenv('TELEGRAM_CHAT_ID'))
-        dc_ok = bool(os.getenv('DISCORD_WEBHOOK_URL'))
-        po_ok = bool(os.getenv('PUSHOVER_USER_KEY') and os.getenv('PUSHOVER_API_TOKEN'))
-        em_ok = bool(os.getenv('EMAIL_SENDER') and os.getenv('EMAIL_PASSWORD') and os.getenv('EMAIL_RECIPIENT'))
-
-        def _svc_line(num, ok, emoji, label):
+        for i, chan in enumerate(CHANNELS, start=1):
+            ok = _channel_configured(chan)
             tick = f"{Fore.GREEN}✅{Style.RESET_ALL}" if ok else f"{Fore.RED}❌{Style.RESET_ALL}"
             clr  = Fore.WHITE if ok else Fore.WHITE + Style.DIM
-            print(f"  {Fore.YELLOW}{Style.BRIGHT}{num}{Style.RESET_ALL}  {tick} {clr}{emoji}  {label}{Style.RESET_ALL}")
-
-        _svc_line("1", tg_ok, "📱", "Telegram")
-        _svc_line("2", dc_ok, "💬", "Discord")
-        _svc_line("3", po_ok, "📲", "Pushover")
-        _svc_line("4", em_ok, "📧", "Gmail")
+            print(f"  {Fore.YELLOW}{Style.BRIGHT}{i}{Style.RESET_ALL}  {tick} "
+                  f"{clr}{chan['emoji']}  {chan['label']}{Style.RESET_ALL}")
         _div()
-        _opt("5", Fore.WHITE + Style.DIM, "📋", "Show Complete .env Example")
-        _opt("0", Fore.RED  + Style.DIM,  "⬅️ ", "Back to Main Menu")
+        env_opt = str(len(CHANNELS) + 1)
+        _opt(env_opt, Fore.WHITE + Style.DIM, "📋", "Show Complete .env Example")
+        _opt("0", Fore.RED + Style.DIM, "⬅️ ", "Back to Main Menu")
 
         choice = _prompt("Choose: ")
-        if choice == "1":
-            telegram_menu()
-        elif choice == "2":
-            discord_menu()
-        elif choice == "3":
-            pushover_menu()
-        elif choice == "4":
-            email_menu()
-        elif choice == "5":
-            show_complete_env_example()
-        elif choice == "0":
+        if choice == "0":
             break
+        elif choice == env_opt:
+            show_complete_env_example()
+        elif choice.isdigit() and 1 <= int(choice) <= len(CHANNELS):
+            channel_menu(CHANNELS[int(choice) - 1])
 
 
 def show_complete_env_example():
@@ -694,8 +767,8 @@ def show_complete_env_example():
     print(f"  {Fore.GREEN}EMAIL_RECIPIENT=recipient@email.com{Style.RESET_ALL}\n")
     print(f"  {Fore.YELLOW}# Timezone (optional — leave blank for system local){Style.RESET_ALL}")
     print(f"  {Fore.GREEN}TIMEZONE=America/New_York{Style.RESET_ALL}\n")
-    print(f"  {Fore.YELLOW}# Heartbeat interval in hours (0 = disabled){Style.RESET_ALL}")
-    print(f"  {Fore.GREEN}HEARTBEAT_INTERVAL=6{Style.RESET_ALL}\n")
+    print(f"  {Fore.YELLOW}# Heartbeat — 1=on, 0=off (legacy HEARTBEAT_INTERVAL still honored){Style.RESET_ALL}")
+    print(f"  {Fore.GREEN}HEARTBEAT_ENABLED=1{Style.RESET_ALL}\n")
     print(f"  {Fore.CYAN}{Style.BRIGHT}{'═'*41}{Style.RESET_ALL}")
     input(f"\n  {Fore.YELLOW}Press Enter to continue...{Style.RESET_ALL}")
 
@@ -717,35 +790,12 @@ def _set_credential(key, prompt_text, secret=False):
     return True
 
 
-def set_telegram_credentials():
-    print(f"\n{Fore.BLUE}{Style.BRIGHT}📱 Enter Telegram Credentials{Style.RESET_ALL}")
+def set_channel_credentials(chan):
+    """Generic credential entry for any registry channel."""
+    print(f"\n{chan['color']}{Style.BRIGHT}{chan['emoji']} Enter {chan['label']} Credentials{Style.RESET_ALL}")
     print(f"{Fore.WHITE}{Style.DIM}Press Enter to skip a field and keep its current value.{Style.RESET_ALL}\n")
-    _set_credential('TELEGRAM_BOT_TOKEN', 'Bot Token')
-    _set_credential('TELEGRAM_CHAT_ID', 'Chat ID')
-    load_dotenv(str(ENV_PATH), override=True)
-
-
-def set_discord_credentials():
-    print(f"\n{Fore.MAGENTA}{Style.BRIGHT}💬 Enter Discord Credentials{Style.RESET_ALL}")
-    print(f"{Fore.WHITE}{Style.DIM}Press Enter to skip and keep current value.{Style.RESET_ALL}\n")
-    _set_credential('DISCORD_WEBHOOK_URL', 'Webhook URL')
-    load_dotenv(str(ENV_PATH), override=True)
-
-
-def set_pushover_credentials():
-    print(f"\n{Fore.YELLOW}{Style.BRIGHT}📲 Enter Pushover Credentials{Style.RESET_ALL}")
-    print(f"{Fore.WHITE}{Style.DIM}Press Enter to skip a field and keep its current value.{Style.RESET_ALL}\n")
-    _set_credential('PUSHOVER_USER_KEY', 'User Key')
-    _set_credential('PUSHOVER_API_TOKEN', 'API Token')
-    load_dotenv(str(ENV_PATH), override=True)
-
-
-def set_email_credentials():
-    print(f"\n{Fore.RED}{Style.BRIGHT}📧 Enter Gmail Credentials{Style.RESET_ALL}")
-    print(f"{Fore.WHITE}{Style.DIM}Press Enter to skip a field and keep its current value.{Style.RESET_ALL}\n")
-    _set_credential('EMAIL_SENDER', 'Sender Email')
-    _set_credential('EMAIL_PASSWORD', 'App Password', secret=True)
-    _set_credential('EMAIL_RECIPIENT', 'Recipient Email')
+    for f in chan["fields"]:
+        _set_credential(f["key"], f["prompt"], secret=f["secret"])
     load_dotenv(str(ENV_PATH), override=True)
 
 # ── CRUD ───────────────────────────────────────────────────────────────────────
@@ -788,7 +838,7 @@ def add_notification():
                 print(f"{Fore.RED}❌ Could not compute next occurrence.{Style.RESET_ALL}")
                 return
             due = due_dt.strftime("%Y-%m-%d %H:%M")
-            due_ts = int(due_dt.timestamp())
+            due_ts = _to_ts(due_dt)
             print(f"  {Fore.CYAN}First occurrence: {Fore.WHITE}{Style.BRIGHT}{due} ({_tz_label()}){Style.RESET_ALL}")
 
         elif rtype in ("2", "3", "4"):
@@ -804,7 +854,7 @@ def add_notification():
                 print(f"{Fore.RED}❌ Due time is in the past!{Style.RESET_ALL}")
                 return
             due = due_dt.strftime("%Y-%m-%d %H:%M")
-            due_ts = int(due_dt.timestamp())
+            due_ts = _to_ts(due_dt)
         else:
             print(f"{Fore.RED}❌ Invalid choice.{Style.RESET_ALL}")
             return
@@ -821,7 +871,7 @@ def add_notification():
             print(f"{Fore.YELLOW}   Current time ({_tz_label()}): {now.strftime('%Y-%m-%d %H:%M')} — enter a future date/time.{Style.RESET_ALL}")
             return
         due = due_dt.strftime("%Y-%m-%d %H:%M")
-        due_ts = int(due_dt.timestamp())
+        due_ts = _to_ts(due_dt)
 
     with get_db() as conn:
         c = conn.cursor()
@@ -848,7 +898,7 @@ def view_notifications():
     with get_db() as conn:
         c = conn.cursor()
         c.execute(
-            "SELECT id, message, due_time, sent, recurrence, repeat_time"
+            "SELECT id, message, due_time, sent, recurrence, repeat_time, due_ts"
             " FROM notifications ORDER BY due_ts"
         )
         rows = c.fetchall()
@@ -858,15 +908,43 @@ def view_notifications():
         return
 
     print(f"\n  {Fore.CYAN}{Style.BRIGHT}{'═'*41}{Style.RESET_ALL}")
-    for nid, msg, due_time, sent, recurrence, repeat_time in rows:
+    for nid, msg, due_time, sent, recurrence, repeat_time, due_ts in rows:
         status = (f"{Fore.GREEN}{Style.BRIGHT}✅ SENT{Style.RESET_ALL}"
                   if sent else f"{Fore.YELLOW}⏳ PENDING{Style.RESET_ALL}")
+        rel = "" if sent else f"  {Fore.WHITE}{Style.DIM}({_relative_due(due_ts)}){Style.RESET_ALL}"
         print(f"  {Fore.YELLOW}{Style.BRIGHT}#{nid}{Style.RESET_ALL}  {Fore.WHITE}{Style.BRIGHT}{msg}{Style.RESET_ALL}")
-        print(f"     {Fore.WHITE}{Style.DIM}Due:{Style.RESET_ALL} {Fore.CYAN}{due_time}{Style.RESET_ALL}  {status}")
+        print(f"     {Fore.WHITE}{Style.DIM}Due:{Style.RESET_ALL} {Fore.CYAN}{due_time}{Style.RESET_ALL}  {status}{rel}")
         if recurrence:
             repeat_label = f" at {repeat_time}" if repeat_time else ""
             print(f"     {Fore.WHITE}{Style.DIM}Repeat:{Style.RESET_ALL} {Fore.MAGENTA}{recurrence.title()}{repeat_label}{Style.RESET_ALL}")
         print(f"  {Fore.WHITE}{Style.DIM}{'─'*39}{Style.RESET_ALL}")
+
+
+def snooze_notification(nid, minutes) -> bool:
+    """Push a notification's due time out by N minutes and re-arm it."""
+    try:
+        nid = int(nid)
+        minutes = int(minutes)
+    except (TypeError, ValueError):
+        print(f"{Fore.RED}❌ ID and minutes must be integers.{Style.RESET_ALL}")
+        return False
+    if minutes <= 0:
+        print(f"{Fore.RED}❌ Minutes must be positive.{Style.RESET_ALL}")
+        return False
+    new_ts = int(time.time()) + minutes * 60
+    new_due = _from_ts(new_ts).strftime("%Y-%m-%d %H:%M")
+    with get_db() as conn:
+        c = conn.cursor()
+        c.execute("SELECT id FROM notifications WHERE id = ?", (nid,))
+        if not c.fetchone():
+            print(f"{Fore.RED}❌ Notification ID {nid} not found!{Style.RESET_ALL}")
+            return False
+        c.execute("UPDATE notifications SET due_ts=?, due_time=?, sent=0 WHERE id=?",
+                  (new_ts, new_due, nid))
+        conn.commit()
+    db_log(nid, "system", "SNOOZED", f"Snoozed {minutes}m → {new_due}")
+    print(f"{Fore.GREEN}✅ ID {nid} snoozed {minutes}m → {new_due} ({_tz_label()}){Style.RESET_ALL}")
+    return True
 
 
 def delete_notification():
@@ -937,7 +1015,7 @@ def edit_notification():
                             next_dt = _next_daily_time(new_repeat_time)
                             if next_dt:
                                 new_due = next_dt.strftime("%Y-%m-%d %H:%M")
-                                new_due_ts = int(next_dt.timestamp())
+                                new_due_ts = _to_ts(next_dt)
                         except ValueError:
                             print(f"{Fore.RED}❌ Invalid format. Keeping original.{Style.RESET_ALL}")
                 else:
@@ -947,7 +1025,7 @@ def edit_notification():
                         due_dt = _parse_due_time(due_raw)
                         if due_dt and due_dt > _now_in_tz():
                             new_due = due_dt.strftime("%Y-%m-%d %H:%M")
-                            new_due_ts = int(due_dt.timestamp())
+                            new_due_ts = _to_ts(due_dt)
                         else:
                             print(f"{Fore.RED}❌ Invalid or past date. Keeping original.{Style.RESET_ALL}")
             elif sched_edit == "2":
@@ -961,7 +1039,7 @@ def edit_notification():
                     print(f"{Fore.RED}❌ Time is in the past! Keeping original.{Style.RESET_ALL}")
                 else:
                     new_due = due_dt.strftime("%Y-%m-%d %H:%M")
-                    new_due_ts = int(due_dt.timestamp())
+                    new_due_ts = _to_ts(due_dt)
                     new_recurrence  = None
                     new_repeat_time = None
         else:
@@ -981,7 +1059,7 @@ def edit_notification():
                         print(f"{Fore.RED}❌ Time is in the past! Keeping original.{Style.RESET_ALL}")
                     else:
                         new_due = due_dt.strftime("%Y-%m-%d %H:%M")
-                        new_due_ts = int(due_dt.timestamp())
+                        new_due_ts = _to_ts(due_dt)
             elif sched_edit == "2":
                 print(f"\n  {Fore.CYAN}Repeat type:{Style.RESET_ALL}")
                 _opt("1", Fore.WHITE, "📆", "Daily (at a specific time)")
@@ -999,7 +1077,7 @@ def edit_notification():
                         next_dt = _next_daily_time(new_repeat_time)
                         if next_dt:
                             new_due = next_dt.strftime("%Y-%m-%d %H:%M")
-                            new_due_ts = int(next_dt.timestamp())
+                            new_due_ts = _to_ts(next_dt)
                     except ValueError:
                         print(f"{Fore.RED}❌ Invalid format! Keeping original.{Style.RESET_ALL}")
                         new_recurrence = None
@@ -1008,7 +1086,7 @@ def edit_notification():
 
         if new_due_ts is None:
             dt = _parse_due_time(new_due)
-            new_due_ts = int(dt.timestamp()) if dt else 0
+            new_due_ts = _to_ts(dt) if dt else 0
 
         c.execute(
             "UPDATE notifications SET message=?, due_time=?, due_ts=?, sent=0, recurrence=?, repeat_time=?"
@@ -1022,25 +1100,35 @@ def edit_notification():
 
 # ── Send notifications (epoch-based, db_log, ≥1-success logic) ────────────────
 
-def send_notifications(verbose=False):
-    """Check for due notifications and send them. verbose=True prints when nothing is due."""
+def send_notifications(verbose=False, only_id=None):
+    """Deliver due notifications. With only_id, force-send that one regardless
+    of its due time / sent flag (used by 'send now for ID' and --send-id)."""
     now_ts = int(time.time())
     with get_db() as conn:
         c = conn.cursor()
-        c.execute(
-            "SELECT id, message, due_ts, recurrence, repeat_time"
-            " FROM notifications WHERE sent=0 AND due_ts <= ?",
-            (now_ts,),
-        )
+        if only_id is not None:
+            c.execute(
+                "SELECT id, message, due_ts, recurrence, repeat_time"
+                " FROM notifications WHERE id = ?",
+                (only_id,),
+            )
+        else:
+            c.execute(
+                "SELECT id, message, due_ts, recurrence, repeat_time"
+                " FROM notifications WHERE sent=0 AND due_ts <= ?",
+                (now_ts,),
+            )
         pending = c.fetchall()
 
         if not pending:
             if verbose:
-                print(f"{Fore.YELLOW}⚠️  No due notifications right now.{Style.RESET_ALL}")
+                msg = (f"❌ No notification with ID {only_id}." if only_id is not None
+                       else "⚠️  No due notifications right now.")
+                _cprint(f"{Fore.YELLOW}{msg}{Style.RESET_ALL}")
             return
 
         for nid, msg, orig_due_ts, recurrence, repeat_time in pending:
-            print(f"{Fore.GREEN}{Style.BRIGHT}📢 Sending: {msg}{Style.RESET_ALL}")
+            _cprint(f"{Fore.GREEN}{Style.BRIGHT}📢 Sending: {msg}{Style.RESET_ALL}")
 
             # Desktop notification
             _notify = getattr(notification, "notify", None) if notification is not None else None
@@ -1053,42 +1141,32 @@ def send_notifications(verbose=False):
             any_success = False
             full_msg    = f"⏰ Reminder: {msg}"
 
-            for fn, ch in [
-                (send_telegram_message, "telegram"),
-                (send_discord_message,  "discord"),
-                (send_pushover_message, "pushover"),
-            ]:
-                ok, resp = fn(full_msg)
+            for chan in CHANNELS:
+                ok, resp = _deliver(chan, full_msg, subject="⏰ Reminder")
                 status = "SUCCESS" if ok else ("SKIPPED" if "Missing" in resp else "FAILED")
-                db_log(nid, ch, status, resp)
+                db_log(nid, chan["name"], status, resp)
                 if ok:
                     any_success = True
-
-            ok, resp = send_email_message(full_msg, subject="⏰ Reminder")
-            status = "SUCCESS" if ok else ("SKIPPED" if "Missing" in resp else "FAILED")
-            db_log(nid, "email", status, resp)
-            if ok:
-                any_success = True
 
             if any_success:
                 c.execute("UPDATE notifications SET sent=1 WHERE id=?", (nid,))
                 if recurrence:
                     next_ts = _next_recurrence_ts(orig_due_ts, recurrence, repeat_time)
                     if next_ts:
-                        next_due_str = datetime.fromtimestamp(next_ts).strftime("%Y-%m-%d %H:%M")
+                        next_due_str = _from_ts(next_ts).strftime("%Y-%m-%d %H:%M")
                         c.execute(
                             "INSERT INTO notifications (message, due_time, due_ts, recurrence, repeat_time)"
                             " VALUES (?, ?, ?, ?, ?)",
                             (msg, next_due_str, next_ts, recurrence, repeat_time),
                         )
-                        print(f"{Fore.CYAN}🔁 Next {recurrence}: {next_due_str}{Style.RESET_ALL}")
+                        _cprint(f"{Fore.CYAN}🔁 Next {recurrence}: {next_due_str}{Style.RESET_ALL}")
                 conn.commit()
-                print(f"{Fore.GREEN}✅ ID {nid} marked sent.{Style.RESET_ALL}")
+                _cprint(f"{Fore.GREEN}✅ ID {nid} marked sent.{Style.RESET_ALL}")
             else:
                 conn.commit()
-                print(f"{Fore.RED}❌ ID {nid} not marked sent — no channel succeeded.{Style.RESET_ALL}")
+                _cprint(f"{Fore.RED}❌ ID {nid} not marked sent — no channel succeeded.{Style.RESET_ALL}")
 
-        print(f"{Fore.GREEN}✅ Processed {len(pending)} notification(s).{Style.RESET_ALL}")
+        _cprint(f"{Fore.GREEN}✅ Processed {len(pending)} notification(s).{Style.RESET_ALL}")
 
 # ── Logs ───────────────────────────────────────────────────────────────────────
 
@@ -1190,7 +1268,7 @@ def import_notifications_from_json():
                 skipped += 1
                 continue
 
-            due_ts = int(dt.timestamp())
+            due_ts = _to_ts(dt)
             c.execute(
                 "INSERT INTO notifications (message, due_time, due_ts, sent, recurrence, repeat_time)"
                 " VALUES (?, ?, ?, ?, ?, ?)",
@@ -1238,7 +1316,7 @@ def launch_tkinter_gui():
                 messagebox.showerror("Error", "Invalid date. Use YYYY-MM-DD HH:MM or MM-DD-YYYY HH:MM.")
                 return
             rec_val   = rec if rec != "None" else None
-            due_ts    = int(dt.timestamp())
+            due_ts    = _to_ts(dt)
             canonical = dt.strftime("%Y-%m-%d %H:%M")
             with get_db() as conn:
                 c = conn.cursor()
@@ -1286,7 +1364,7 @@ def launch_tkinter_gui():
             refresh_listbox()
 
     root = tk.Tk()
-    root.title("Notifier GUI — v2.0.6")
+    root.title(f"Notifier GUI — v{_get_app_version()}")
     root.geometry("720x460")
     tk.Label(root, text="Reminders", font=("Arial", 14, "bold")).pack(pady=8)
     listbox = tk.Listbox(root, width=95, height=18)
@@ -1327,11 +1405,43 @@ def check_for_updates():
     return None
 
 
+def _backup_local_state(script_dir: Path) -> Path | None:
+    """Copy the DB + .env aside before a destructive update.
+
+    `git reset --hard` discards anything tracked; the DB/.env are gitignored
+    so they survive a clean repo, but a stray `.gitignore` change (or a future
+    tracked DB) would mean silent data loss. A timestamped copy is cheap
+    insurance.
+    """
+    import shutil
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_dir = script_dir / "backups" / stamp
+    saved = []
+    try:
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        for name in (DB_NAME, ".env", "version_notes.db"):
+            src = script_dir / name
+            if src.exists():
+                shutil.copy2(src, backup_dir / name)
+                saved.append(name)
+    except Exception as e:
+        print(f"{Fore.YELLOW}⚠️  Backup failed ({e}); aborting update to be safe.{Style.RESET_ALL}")
+        return None
+    if saved:
+        print(f"{Fore.GREEN}💾 Backed up {', '.join(saved)} → {backup_dir}{Style.RESET_ALL}")
+    return backup_dir
+
+
 def do_update():
     """Pull latest code via git and reinstall dependencies."""
     import subprocess
     import sys
     script_dir = Path(__file__).parent
+
+    # Snapshot local data before the hard reset wipes the working tree.
+    if _backup_local_state(script_dir) is None:
+        return False
+
     print(f"{Fore.CYAN}📦 Fetching latest code...{Style.RESET_ALL}")
     try:
         subprocess.run(["git", "-C", str(script_dir), "fetch", "origin"], check=True)
@@ -1409,8 +1519,7 @@ def system_menu():
         ver_str = f"v{ver}"
         _box(Fore.CYAN, "⚙️  SYSTEM", ver_str)
         tz_label   = _tz_label()
-        hb_interval = os.getenv('HEARTBEAT_INTERVAL', '24')
-        hb_label    = "daily (00:00–12:00)" if hb_interval != '0' else "disabled"
+        hb_label    = "daily (00:00–12:00)" if _heartbeat_enabled() else "disabled"
         _opt("1", Fore.CYAN,                   "📜", "View Version History")
         _opt("2", Fore.GREEN  + Style.BRIGHT,  "➕", "Add New Version Release")
         _opt("3", Fore.BLUE   + Style.BRIGHT,  "✏️ ", "Edit Version Notes")
@@ -1470,18 +1579,17 @@ def system_menu():
                 print(f"{Fore.YELLOW}Cancelled — timezone unchanged.{Style.RESET_ALL}")
             input(f"\n  {Fore.YELLOW}Press Enter to continue...{Style.RESET_ALL}")
         elif choice == "6":
-            current_hb = os.getenv('HEARTBEAT_INTERVAL', '24')
-            current_label = "disabled" if current_hb == '0' else "enabled (daily 00:00–12:00)"
+            current_label = "enabled (daily 00:00–12:00)" if _heartbeat_enabled() else "disabled"
             print(f"\n{Fore.MAGENTA}{Style.BRIGHT}💓 Configure Heartbeat{Style.RESET_ALL}")
             print(f"  {Fore.WHITE}{Style.DIM}Current: {current_label}{Style.RESET_ALL}")
             print(f"  {Fore.WHITE}{Style.DIM}Fires once daily at a random time between 00:00 and 12:00.{Style.RESET_ALL}")
-            print(f"  {Fore.WHITE}{Style.DIM}Set to 0 to disable, any other value to enable.{Style.RESET_ALL}")
+            print(f"  {Fore.WHITE}{Style.DIM}1 = enable, 0 = disable.{Style.RESET_ALL}")
             new_hb = _prompt("Enable heartbeat? (0=disable / 1=enable): ")
-            if new_hb.isdigit():
-                set_key(str(ENV_PATH), 'HEARTBEAT_INTERVAL', new_hb)
-                os.environ['HEARTBEAT_INTERVAL'] = new_hb
+            if new_hb in ('0', '1'):
+                set_key(str(ENV_PATH), 'HEARTBEAT_ENABLED', new_hb)
+                os.environ['HEARTBEAT_ENABLED'] = new_hb
                 load_dotenv(str(ENV_PATH), override=True)
-                status = f"every {new_hb}h" if new_hb != '0' else "disabled"
+                status = "enabled" if new_hb == '1' else "disabled"
                 print(f"{Fore.GREEN}✅ Heartbeat {status}. Restart app to apply.{Style.RESET_ALL}")
             else:
                 print(f"{Fore.YELLOW}⚠️  Invalid input — unchanged.{Style.RESET_ALL}")
@@ -1503,67 +1611,175 @@ def _get_app_version() -> str:
         vm.setup_database()
         return vm.get_current_version()
     except Exception:
-        return "2.0.0"
+        return "2.1.0"
 
 # ── Background runner ──────────────────────────────────────────────────────────
 
 def background_runner():
-    """Daemon thread — runs scheduled notification checks and heartbeat."""
+    """Daemon thread — runs scheduled notification checks and heartbeat.
+
+    Scheduled jobs run with _QUIET on so their sender output never scrambles
+    the interactive menu the user may be sitting in; it still hits the log
+    file and the audit DB.
+    """
+    global _QUIET
     while True:
         try:
+            _QUIET = True
             schedule.run_pending()
         except Exception as exc:
             logging.exception("Scheduler error: %s", exc)
+        finally:
+            _QUIET = False
         time.sleep(60)
 
-# ── Main ───────────────────────────────────────────────────────────────────────
+# ── Scheduler setup (shared by interactive + daemon) ──────────────────────────
 
-def main():
-    init_db()
+def _heartbeat_enabled() -> bool:
+    """Heartbeat on unless HEARTBEAT_ENABLED/HEARTBEAT_INTERVAL is 0/false/off.
 
-    # Schedule notification check every minute
+    Historically this was HEARTBEAT_INTERVAL ("hours") but the code only ever
+    treated it as a boolean. HEARTBEAT_ENABLED is the new name; the old var is
+    still honored for backward compatibility.
+    """
+    raw = os.getenv('HEARTBEAT_ENABLED', os.getenv('HEARTBEAT_INTERVAL', '1')).strip().lower()
+    return raw not in ('0', 'false', 'no', 'off', '')
+
+
+def setup_schedule():
+    """Register the recurring jobs. Returns the heartbeat fire time or None."""
     try:
         schedule.every(1).minutes.do(send_notifications)
     except Exception as e:
+        logging.error("Could not set up scheduler: %s", e)
         print(f"{Fore.RED}⚠️  Warning: Could not set up scheduler: {e}{Style.RESET_ALL}")
 
-    # Schedule heartbeat — once per day at a random time between 00:00 and 12:00
-    # Default is enabled (HEARTBEAT_INTERVAL != 0); set to 0 in .env to disable.
     hb_fire_time = None
-    try:
-        if int(os.getenv('HEARTBEAT_INTERVAL', '24')) != 0:
-            hh = random.randint(0, 11)
-            mm = random.randint(0, 59)
-            hb_fire_time = f"{hh:02d}:{mm:02d}"
+    if _heartbeat_enabled():
+        try:
+            hb_fire_time = f"{random.randint(0, 11):02d}:{random.randint(0, 59):02d}"
             schedule.every().day.at(hb_fire_time).do(send_heartbeat)
             logging.info("Heartbeat scheduled daily at %s", hb_fire_time)
-    except (ValueError, Exception):
-        pass
+        except Exception:
+            hb_fire_time = None
+    return hb_fire_time
 
-    # Start background thread
-    t = threading.Thread(target=background_runner, daemon=True)
-    t.start()
 
-    # Optional admin startup alert
-    send_admin_notification(
-        f"✅ Notifier v2.0.0 started at {datetime.now().strftime('%Y-%m-%d %H:%M')}",
-        include_system_info=True,
-    )
-
-    # Startup banner
-    ver = _get_app_version()
+def _print_startup_banner(hb_fire_time, ver, daemon=False):
+    mode = "daemon" if daemon else "interactive"
     print(f"\n  {Fore.CYAN}{Style.BRIGHT}{'═'*41}{Style.RESET_ALL}")
-    print(f"  {Fore.CYAN}{Style.BRIGHT}🔔  Notifier  {Fore.WHITE}v{ver}{Style.RESET_ALL}")
+    print(f"  {Fore.CYAN}{Style.BRIGHT}🔔  Notifier  {Fore.WHITE}v{ver}{Style.RESET_ALL}  {Fore.WHITE}{Style.DIM}({mode}){Style.RESET_ALL}")
     print(f"  {Fore.CYAN}{Style.BRIGHT}{'═'*41}{Style.RESET_ALL}")
     print(f"  {Fore.GREEN}✅  Background scheduler started{Style.RESET_ALL}")
     print(f"  {Fore.WHITE}{Style.DIM}🕐  Timezone: {Fore.YELLOW}{Style.BRIGHT}{_tz_label()}{Style.RESET_ALL}")
     if hb_fire_time:
         print(f"  {Fore.MAGENTA}💓  Heartbeat daily at {hb_fire_time} (window: 00:00–12:00){Style.RESET_ALL}")
     else:
-        print(f"  {Fore.WHITE}{Style.DIM}💓  Heartbeat disabled (HEARTBEAT_INTERVAL=0){Style.RESET_ALL}")
+        print(f"  {Fore.WHITE}{Style.DIM}💓  Heartbeat disabled (HEARTBEAT_ENABLED=0){Style.RESET_ALL}")
     if not NOTIFICATIONS_AVAILABLE:
         print(f"  {Fore.YELLOW}⚠️   Desktop notifications disabled (install plyer){Style.RESET_ALL}")
     print()
+
+
+def _admin_startup_alert(ver):
+    send_admin_notification(
+        f"✅ Notifier v{ver} started at {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+        include_system_info=True,
+    )
+
+# ── Headless CLI entry points ─────────────────────────────────────────────────
+
+def create_notification_cli(msg, due_raw, repeat=None, at=None) -> bool:
+    """Non-interactive notification create. Returns True on success."""
+    if not msg or len(msg) > 4000:
+        print(f"{Fore.RED}❌ Message must be 1–4000 characters.{Style.RESET_ALL}")
+        return False
+
+    recurrence = repeat if repeat in ("daily", "weekly", "biweekly", "monthly") else None
+    repeat_time = None
+
+    if recurrence == "daily":
+        at = at or due_raw
+        try:
+            datetime.strptime(at, "%H:%M")
+        except (ValueError, TypeError):
+            print(f"{Fore.RED}❌ Daily repeat needs --at HH:MM (got {at!r}).{Style.RESET_ALL}")
+            return False
+        repeat_time = at
+        due_dt = _next_daily_time(repeat_time)
+        if due_dt is None:
+            print(f"{Fore.RED}❌ Could not compute next occurrence.{Style.RESET_ALL}")
+            return False
+    else:
+        due_dt = _parse_due_time(due_raw or "")
+        if due_dt is None:
+            print(f"{Fore.RED}❌ Invalid --due. Use 'YYYY-MM-DD HH:MM'.{Style.RESET_ALL}")
+            return False
+        if due_dt <= _now_in_tz():
+            print(f"{Fore.RED}❌ --due is in the past ({_tz_label()}).{Style.RESET_ALL}")
+            return False
+
+    due = due_dt.strftime("%Y-%m-%d %H:%M")
+    due_ts = _to_ts(due_dt)
+    with get_db() as conn:
+        c = conn.cursor()
+        c.execute(
+            "INSERT INTO notifications (message, due_time, due_ts, recurrence, repeat_time)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (msg, due, due_ts, recurrence, repeat_time),
+        )
+        nid = c.lastrowid
+        conn.commit()
+    db_log(nid, "system", "CREATED",
+           f"CLI add: {msg} | due={due} | recurrence={recurrence} | repeat_time={repeat_time}")
+    label = (f"Daily at {repeat_time}, next {due}" if repeat_time
+             else f"{recurrence.title()}, first {due}" if recurrence
+             else f"Due {due}")
+    print(f"{Fore.GREEN}✅ Added ID:{nid} | {label}{Style.RESET_ALL}")
+    return True
+
+
+def run_daemon():
+    """Headless scheduler loop — no menu, no stdin. For Task Scheduler/systemd."""
+    init_db()
+    ver = _get_app_version()
+    hb_fire_time = setup_schedule()
+    _admin_startup_alert(ver)
+    _print_startup_banner(hb_fire_time, ver, daemon=True)
+    logging.info("Notifier v%s started in daemon mode", ver)
+    print(f"  {Fore.WHITE}{Style.DIM}Running. Ctrl+C to stop.{Style.RESET_ALL}\n")
+    try:
+        while True:
+            try:
+                schedule.run_pending()
+            except Exception as exc:
+                logging.exception("Scheduler error: %s", exc)
+            time.sleep(30)
+    except KeyboardInterrupt:
+        print(f"\n  {Fore.GREEN}👋  Daemon stopped.{Style.RESET_ALL}")
+        send_admin_notification(
+            f"🛑 Notifier daemon stopped at {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+        )
+
+
+def run_send_now():
+    """One-shot: deliver everything due, then exit. Ideal for cron/schtasks."""
+    init_db()
+    send_notifications(verbose=True)
+
+# ── Main ───────────────────────────────────────────────────────────────────────
+
+def main():
+    init_db()
+    ver = _get_app_version()
+    hb_fire_time = setup_schedule()
+
+    # Start background thread
+    t = threading.Thread(target=background_runner, daemon=True)
+    t.start()
+
+    _admin_startup_alert(ver)
+    _print_startup_banner(hb_fire_time, ver)
 
     # Main menu loop
     while True:
@@ -1595,6 +1811,15 @@ def main():
             view_notifications()
         elif choice == "3":
             send_notifications(verbose=True)
+            extra = _prompt("Send a specific ID now / snooze? (id | id+mins | Enter to skip): ")
+            if extra:
+                parts = extra.replace("+", " ").split()
+                if len(parts) == 1 and parts[0].isdigit():
+                    send_notifications(verbose=True, only_id=int(parts[0]))
+                elif len(parts) == 2 and all(p.lstrip("-").isdigit() for p in parts):
+                    snooze_notification(parts[0], parts[1])
+                else:
+                    print(f"{Fore.YELLOW}⚠️  Unrecognized — use '5' or '5 30'.{Style.RESET_ALL}")
         elif choice == "4":
             edit_notification()
         elif choice == "5":
@@ -1621,5 +1846,66 @@ def main():
             print(f"{Fore.RED}❌ Invalid choice. Please try again.{Style.RESET_ALL}")
 
 
-if __name__ == "__main__":
+def cli():
+    """Parse argv and dispatch. No args → interactive menu (legacy default)."""
+    import argparse
+    p = argparse.ArgumentParser(
+        prog="notifier",
+        description="Multi-channel notification scheduler. "
+                    "Run with no arguments for the interactive menu.",
+    )
+    g = p.add_mutually_exclusive_group()
+    g.add_argument("--daemon", action="store_true",
+                   help="Headless scheduler loop (no menu). For Task Scheduler/systemd.")
+    g.add_argument("--send-now", action="store_true",
+                   help="Deliver everything currently due, then exit.")
+    g.add_argument("--add", metavar="MESSAGE",
+                   help="Add a notification non-interactively (needs --due, or --repeat daily --at).")
+    g.add_argument("--list", action="store_true",
+                   help="Print scheduled notifications and exit.")
+    g.add_argument("--send-id", metavar="ID", type=int,
+                   help="Force-send one notification by ID now, then exit.")
+    g.add_argument("--snooze", metavar="ID", type=int,
+                   help="Push a notification's due time out by --minutes.")
+    p.add_argument("--minutes", metavar="N", type=int, default=15,
+                   help="Minutes for --snooze (default 15).")
+    p.add_argument("--due", metavar="'YYYY-MM-DD HH:MM'",
+                   help="Due time for --add (one-time / weekly / biweekly / monthly).")
+    p.add_argument("--repeat", choices=["daily", "weekly", "biweekly", "monthly"],
+                   help="Make --add recurring.")
+    p.add_argument("--at", metavar="HH:MM",
+                   help="Time of day for --repeat daily.")
+    p.add_argument("--version", action="store_true", help="Print version and exit.")
+    args = p.parse_args()
+
+    if args.version:
+        print(f"Notifier v{_get_app_version()}")
+        return
+    if args.daemon:
+        run_daemon()
+        return
+    if args.send_now:
+        run_send_now()
+        return
+    if args.list:
+        init_db()
+        view_notifications()
+        return
+    if args.send_id is not None:
+        init_db()
+        send_notifications(verbose=True, only_id=args.send_id)
+        return
+    if args.snooze is not None:
+        init_db()
+        ok = snooze_notification(args.snooze, args.minutes)
+        sys.exit(0 if ok else 1)
+    if args.add:
+        init_db()
+        ok = create_notification_cli(args.add, args.due, repeat=args.repeat, at=args.at)
+        sys.exit(0 if ok else 1)
+
     main()
+
+
+if __name__ == "__main__":
+    cli()

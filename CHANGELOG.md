@@ -5,41 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [v2.0.6] - 2026-03-05  *(Latest)*
+## [v2.1.0] - 2026-05-19  *(Latest)*
 
 ### Added
 
-- Heartbeat on by default — fires once daily at a random time between 00:00 and 12:00 using `schedule.every().day.at()`; chosen fire time shown in startup banner; set `HEARTBEAT_INTERVAL=0` to disable
-- If no notification services are configured, heartbeat is silently logged to file and DB only (no send attempts); `import random` restored for daily time selection
+- Headless + reliability release. Fixed: startup admin alert / GUI title / fallback hardcoded to v2.0.0 (now read live); timezone bug where naive datetime.timestamp() assumed the machine clock instead of TIMEZONE (new _to_ts/_from_ts, all scheduling math routed through them); background scheduler stdout scrambling the interactive menu (new _QUIET/_cprint, jobs run quiet). Added: headless CLI — --daemon, --send-now, --send-id, --snooze/--minutes, --add/--due/--repeat/--at, --list, --version (interactive menu still the no-arg default); UTF-8 stdout/stderr + log guard so emoji/box glyphs no longer crash piped/Task-Scheduler runs; channel registry (CHANNELS) collapsing the 4x duplicated send/verify/menu/credential code into one generic path; bounded retry/backoff on transient send failures via _deliver/_is_transient; pre-update DB+.env backup before git reset --hard; relative due times in the list; HEARTBEAT_ENABLED (legacy HEARTBEAT_INTERVAL still honored); send-by-id / snooze from the Send-Due menu. Added test_notifier_smoke.py (32 checks).
 
-### Changed
+## [v2.0.6] - 2026-03-05
 
-- `install.sh` starter `.env` now sets `HEARTBEAT_INTERVAL=24` (enabled) instead of `0`
-- System menu option 6 prompt updated to reflect enable/disable model instead of hourly interval
+### Other
+
+- Heartbeat on by default — fires once daily at a random time between 00:00 and 12:00 (schedule.every().day.at()); if no notification services are configured the heartbeat is logged to file and DB only without attempting any sends; HEARTBEAT_INTERVAL=0 still disables it; startup banner shows the chosen daily fire time
 
 ## [v2.0.5] - 2026-03-05
 
-### Fixed
+### Added
 
-- Fixed About box alignment — each row is now exactly 73 visible chars with `#` flush on both sides; rewrote `_row()` to calculate padding from the plain-text inner length before applying colorama ANSI codes, eliminating escape-sequence interference with string padding
+- Fixed About box alignment — each row is now exactly 73 visible chars with # on both sides; rewrote _row() to compute visible inner length before adding color codes, eliminating ANSI escape sequence interference with padding calculation
 
 ## [v2.0.4] - 2026-03-05
 
 ### Added
 
-- Added About screen to System menu option 7 — displays Title, Author(s), Revised date, Description, Version, Entry Point, License, and GitHub URL in script-header format; Version and Revised date are pulled live from `version_notes.db` via `get_latest_release_info()` so they auto-update with every version bump; `get_latest_release_info()` helper added to `version_manager.py`
+- Added About screen to System menu option 7 — shows Title, Author(s), Revised date, Description, Version, Entry Point, License, and GitHub URL; Version and Revised date are pulled live from version_notes.db via get_latest_release_info() so they auto-update with every version bump
 
 ## [v2.0.3] - 2026-03-05
 
 ### Added
 
-- Added monthly recurrence option — `_next_month_dt()` helper uses stdlib `calendar` for correct end-of-month clamping (e.g. Jan 31 → Feb 28/29); `_next_recurrence_ts()` handles monthly roll-forward; add and edit menus show option **4 Monthly**; Tkinter GUI Combobox includes monthly; JSON import validation accepts monthly
+- Added monthly recurrence option — _next_month_dt() helper uses stdlib calendar for correct end-of-month clamping (e.g. Jan 31 -> Feb 28), _next_recurrence_ts() handles monthly roll-forward, add/edit menus show option 4 Monthly, Tkinter GUI Combobox includes monthly, import validation accepts monthly
 
 ## [v2.0.2] - 2026-03-05
 
-### Fixed
+### Added
 
-- Fixed GDBus D-Bus error on headless Linux servers — added `DISPLAY`/`WAYLAND_DISPLAY` environment variable check after plyer import; `NOTIFICATIONS_AVAILABLE` is set to `False` when no graphical display is detected, preventing `notify-send` from spawning and printing D-Bus errors to the console
+- Fixed GDBus D-Bus error on headless Linux servers — added DISPLAY/WAYLAND_DISPLAY env check after plyer import; NOTIFICATIONS_AVAILABLE set to False when no graphical display is present, preventing notify-send subprocess from spawning and printing D-Bus errors
 
 ## [v2.0.1] - 2026-03-04
 

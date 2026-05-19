@@ -135,6 +135,9 @@ SEED_VERSIONS = [
     ("023", "2.0.6",
      "Heartbeat on by default — fires once daily at a random time between 00:00 and 12:00 (schedule.every().day.at()); if no notification services are configured the heartbeat is logged to file and DB only without attempting any sends; HEARTBEAT_INTERVAL=0 still disables it; startup banner shows the chosen daily fire time",
      "2026-03-05 04:00:00"),
+    ("024", "2.1.0",
+     "Headless + reliability release. Fixed: startup admin alert / GUI title / fallback hardcoded to v2.0.0 (now read live); timezone bug where naive datetime.timestamp() assumed the machine clock instead of TIMEZONE (new _to_ts/_from_ts, all scheduling math routed through them); background scheduler stdout scrambling the interactive menu (new _QUIET/_cprint, jobs run quiet). Added: headless CLI — --daemon, --send-now, --send-id, --snooze/--minutes, --add/--due/--repeat/--at, --list, --version (interactive menu still the no-arg default); UTF-8 stdout/stderr + log guard so emoji/box glyphs no longer crash piped/Task-Scheduler runs; channel registry (CHANNELS) collapsing the 4x duplicated send/verify/menu/credential code into one generic path; bounded retry/backoff on transient send failures via _deliver/_is_transient; pre-update DB+.env backup before git reset --hard; relative due times in the list; HEARTBEAT_ENABLED (legacy HEARTBEAT_INTERVAL still honored); send-by-id / snooze from the Send-Due menu. Added test_notifier_smoke.py (32 checks).",
+     "2026-05-19 12:00:00"),
 ]
 
 
@@ -161,7 +164,7 @@ def seed_initial_versions():
 def get_current_version() -> str:
     """Return the latest version string from the DB, or '1.0.39' as fallback."""
     latest = get_latest_version_data()
-    return latest[1] if latest else "2.0.6"
+    return latest[1] if latest else "2.1.0"
 
 
 def get_latest_version_data():
