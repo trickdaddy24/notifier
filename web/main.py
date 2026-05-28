@@ -586,7 +586,7 @@ async def get_channel_details(channel_name: str, user: Optional[str] = Depends(g
 @app.post("/api/channels/{channel_name}")
 async def save_channel_credentials(
     channel_name: str,
-    credentials: dict = Form(...),   # Expect JSON-like dict from frontend
+    credentials: str = Form(...),   # We receive it as a JSON string from the form
     user: Optional[str] = Depends(get_current_user)
 ):
     if user is None:
@@ -597,13 +597,19 @@ async def save_channel_credentials(
         return JSONResponse({"error": "Channel not found"}, status_code=404)
 
     try:
-        for key, value in credentials.items():
+        import json
+        creds_dict = json.loads(credentials) if isinstance(credentials, str) else credentials
+
+        for key, value in creds_dict.items():
             if value:  # Only save non-empty values
                 set_channel_credential(channel_name, key.lower().replace(f"{channel_name}_", ""), value)
 
         logger.info(f"User '{user}' updated credentials for channel: {channel_name}")
         return {"success": True, "message": f"{channel.get('label', channel_name)} credentials saved."}
+    except json.JSONDecodeError:
+        return JSONResponse({"success": False, "error": "Invalid data format sent from browser"}, status_code=400)
     except Exception as e:
+        logger.exception("Failed to save channel credentials")
         return JSONResponse({"success": False, "error": str(e)}, status_code=500)
 
 

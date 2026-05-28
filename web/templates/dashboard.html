@@ -547,16 +547,43 @@
                 method: 'POST',
                 body: formData
             });
-            const data = await res.json();
 
-            alert(data.message || data.error);
+            let data = {};
+            try {
+                data = await res.json();
+            } catch (e) {
+                data = {};
+            }
+
+            if (!res.ok) {
+                const errorMsg = data.error || data.detail || data.message || `Server returned error ${res.status}`;
+                alert("Failed to save:\n\n" + errorMsg);
+            } else if (data.success) {
+                alert(data.message || "Saved successfully");
+            } else {
+                alert(data.error || "Unknown error while saving");
+            }
+
             loadChannels(); // refresh list
         }
 
         async function testChannel(channelName) {
-            const res = await fetch(`/api/channels/${channelName}/test`, { method: 'POST' });
-            const data = await res.json();
-            alert(data.success ? data.message : (data.error || 'Test failed'));
+            try {
+                const res = await fetch(`/api/channels/${channelName}/test`, { method: 'POST' });
+                let data = {};
+                try {
+                    data = await res.json();
+                } catch (e) {}
+
+                if (data.success) {
+                    alert(data.message);
+                } else {
+                    const errorMsg = data.error || data.detail || data.message || `Test failed (status ${res.status})`;
+                    alert("Test failed:\n\n" + errorMsg);
+                }
+            } catch (err) {
+                alert("Network error while testing channel");
+            }
         }
 
         // Load channels on page load
