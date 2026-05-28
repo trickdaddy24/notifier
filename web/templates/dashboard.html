@@ -132,13 +132,38 @@
 
         <!-- Recent Activity / Logs -->
         <div class="mt-8">
-            <div class="flex items-center justify-between mb-4">
+            <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
                 <h2 class="text-xl font-semibold">Recent Activity</h2>
-                <button onclick="loadLogs()" 
-                        class="px-4 py-2 text-sm bg-zinc-700 hover:bg-zinc-600 rounded-2xl flex items-center gap-2 transition-colors">
-                    <i class="fa-solid fa-sync"></i>
-                    <span>Refresh Logs</span>
-                </button>
+                
+                <div class="flex flex-wrap gap-3 items-center">
+                    <!-- Filters -->
+                    <select id="log-filter-channel" onchange="loadLogs()" 
+                            class="bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-1.5 text-sm">
+                        <option value="">All Channels</option>
+                        <option value="telegram">Telegram</option>
+                        <option value="discord">Discord</option>
+                    </select>
+
+                    <select id="log-filter-status" onchange="loadLogs()" 
+                            class="bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-1.5 text-sm">
+                        <option value="">All Statuses</option>
+                        <option value="SUCCESS">Success</option>
+                        <option value="FAILED">Failed</option>
+                        <option value="SKIPPED">Skipped</option>
+                    </select>
+
+                    <button onclick="loadLogs()" 
+                            class="px-4 py-1.5 text-sm bg-zinc-700 hover:bg-zinc-600 rounded-xl flex items-center gap-2 transition-colors">
+                        <i class="fa-solid fa-sync"></i>
+                        <span>Refresh</span>
+                    </button>
+
+                    <button onclick="clearAllLogs()" 
+                            class="px-4 py-1.5 text-sm bg-red-700 hover:bg-red-600 rounded-xl flex items-center gap-2 transition-colors">
+                        <i class="fa-solid fa-trash"></i>
+                        <span>Clear All</span>
+                    </button>
+                </div>
             </div>
 
             <div id="logs-container" 
@@ -355,15 +380,22 @@
             const container = document.getElementById('logs-container');
             container.innerHTML = '<div class="text-zinc-400">Loading...</div>';
 
+            const channelFilter = document.getElementById('log-filter-channel')?.value || '';
+            const statusFilter = document.getElementById('log-filter-status')?.value || '';
+
+            let url = '/api/logs?limit=40';
+            if (channelFilter) url += `&channel=${channelFilter}`;
+            if (statusFilter) url += `&status=${statusFilter}`;
+
             try {
-                const res = await fetch('/api/logs?limit=25');
+                const res = await fetch(url);
                 const data = await res.json();
 
                 if (!data.logs || data.logs.length === 0) {
                     container.innerHTML = `
                         <div class="text-center py-8 text-zinc-400">
                             <i class="fa-solid fa-history text-2xl mb-2 block"></i>
-                            <p>No activity yet.</p>
+                            <p>No activity matching filters.</p>
                         </div>
                     `;
                     return;
@@ -378,6 +410,7 @@
                                     <th class="pb-2 pr-4">Reminder</th>
                                     <th class="pb-2 pr-4">Channel</th>
                                     <th class="pb-2 pr-4">Status</th>
+                                    <th class="pb-2 pr-4 w-10"></th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -399,6 +432,12 @@
                             <td class="py-2 pr-4">
                                 <span class="${statusClass} text-xs font-medium">${log.status}</span>
                             </td>
+                            <td class="py-2 pr-4 text-right">
+                                <button onclick="deleteLog(${log.id}, this)" 
+                                        class="text-zinc-500 hover:text-red-400 p-1">
+                                    <i class="fa-solid fa-trash text-sm"></i>
+                                </button>
+                            </td>
                         </tr>
                     `;
                 });
@@ -408,6 +447,37 @@
 
             } catch (err) {
                 container.innerHTML = `<div class="text-red-400">Failed to load logs: ${err}</div>`;
+            }
+        }
+
+        async function deleteLog(logId, btn) {
+            if (!confirm('Delete this log entry?')) return;
+
+            try {
+                const res = await fetch(`/api/logs/${logId}`, { method: 'DELETE' });
+                if (res.ok) {
+                    btn.closest('tr').remove();
+                } else {
+                    alert('Failed to delete log');
+                }
+            } catch (err) {
+                alert('Error deleting log');
+            }
+        }
+
+        async function clearAllLogs() {
+            if (!confirm('Delete ALL log entries? This cannot be undone.')) return;
+
+            try {
+                const res = await fetch('/api/logs', { method: 'DELETE' });
+                const data = await res.json();
+                if (data.success) {
+                    loadLogs();
+                } else {
+                    alert('Failed to clear logs: ' + (data.error || 'Unknown error'));
+                }
+            } catch (err) {
+                alert('Error clearing logs');
             }
         }
 

@@ -473,6 +473,38 @@ async def get_logs(limit: int = 30, user: Optional[str] = Depends(get_current_us
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+@app.delete("/api/logs/{log_id}")
+async def delete_log(log_id: int, user: Optional[str] = Depends(get_current_user)):
+    if user is None:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    try:
+        with get_db() as conn:
+            c = conn.cursor()
+            c.execute("DELETE FROM logs WHERE id = ?", (log_id,))
+            conn.commit()
+        return {"success": True}
+    except Exception as e:
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.delete("/api/logs")
+async def clear_logs(user: Optional[str] = Depends(get_current_user)):
+    """Clear all logs (or could be extended with filters later)."""
+    if user is None:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    try:
+        with get_db() as conn:
+            c = conn.cursor()
+            c.execute("DELETE FROM logs")
+            conn.commit()
+        logger.info(f"User '{user}' cleared all logs")
+        return {"success": True, "message": "All logs cleared."}
+    except Exception as e:
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
 # ── Heartbeat Settings API ───────────────────────────────────────────────────
 
 @app.get("/api/settings/heartbeat")
