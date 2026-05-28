@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  notifier-web:
+    build: .
+    container_name: notifier-web
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - NOTIFIER_WEB_PASSWORD=${NOTIFIER_WEB_PASSWORD}
+      - TIMEZONE=${TIMEZONE:-America/New_York}
+    volumes:
+      - ./data:/app/data
+      - ./.env:/app/.env:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Optional: Add Caddy for reverse proxy + automatic HTTPS later
+  # caddy:
+  #   image: caddy:2
+  #   restart: unless-stopped
+  #   ports:
+  #     - "80:80"
+  #     - "443:443"
+  #   volumes:
+  #     - ./Caddyfile:/etc/caddy/Caddyfile
+  #     - caddy_data:/data
+  #     - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:
