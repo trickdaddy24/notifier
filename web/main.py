@@ -25,6 +25,8 @@ from datetime import datetime
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
+logger = logging.getLogger("notifier.web")
+
 from .auth import (
     perform_login,
     get_session_cookie,
@@ -98,7 +100,6 @@ async def lifespan(app: FastAPI):
     from notifier.notifications import configure_logging
     configure_logging()
 
-    logger = logging.getLogger("notifier.web")
     logger.info("Notifier Web starting up...")
 
     print(f"[notifier-web] Initializing database at {DB_PATH} (using shared notifier.db)")

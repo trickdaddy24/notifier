@@ -335,7 +335,13 @@
                     alert("Telegram Test Failed:\n\n" + (data.error || "Unknown error"));
                 }
             } catch (err) {
-                alert("❌ Network error while testing Telegram");
+                // Try to give better feedback if possible
+                if (err.name === 'SyntaxError') {
+                    alert("❌ Server returned an invalid response (possible 500 error). Check container logs.");
+                } else {
+                    alert("❌ Network error while testing Telegram. Check your connection or container logs.");
+                }
+                console.error("Test Telegram error:", err);
             }
         }
 
