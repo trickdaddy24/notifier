@@ -401,3 +401,45 @@ async def test_telegram(user: Optional[str] = Depends(get_current_user)):
             {"success": False, "error": f"Unexpected error: {str(e)}"},
             status_code=500
         )
+
+
+@app.get("/api/logs")
+async def get_logs(limit: int = 30, user: Optional[str] = Depends(get_current_user)):
+    """Return recent notification activity logs (joined with reminder message when possible)."""
+    if user is None:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    try:
+        with get_db() as conn:
+            c = conn.cursor()
+            c.execute("""
+                SELECT 
+                    l.id,
+                    l.timestamp,
+                    l.channel,
+                    l.status,
+                    l.response,
+                    l.notification_id,
+                    n.message
+                FROM logs l
+                LEFT JOIN notifications n ON l.notification_id = n.id
+                ORDER BY l.id DESC
+                LIMIT ?
+            """, (limit,))
+            rows = c.fetchall()
+
+        logs = []
+        for row in rows:
+            logs.append({
+                "id": row["id"],
+                "timestamp": row["timestamp"],
+                "channel": row["channel"],
+                "status": row["status"],
+                "response": row["response"],
+                "notification_id": row["notification_id"],
+                "message": row["message"] or "(deleted reminder)"
+            })
+
+        return {"logs": logs}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
