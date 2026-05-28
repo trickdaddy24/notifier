@@ -14,8 +14,10 @@ from __future__ import annotations
 import os
 import sqlite3
 from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -141,15 +143,13 @@ def init_db(backfill_legacy: bool = True) -> None:
         if backfill_legacy:
             c.execute("SELECT id, due_time FROM notifications WHERE due_ts = 0 OR due_ts IS NULL")
             for row_id, due_str in c.fetchall():
-                # We import these helpers locally to avoid circular imports
                 try:
-                    from . import _parse_due_time, _to_ts
-                    dt = _parse_due_time(due_str)
-                    if dt:
-                        c.execute("UPDATE notifications SET due_ts = ? WHERE id = ?",
-                                  (_to_ts(dt), row_id))
+                    # Use the local _to_ts defined in this module
+                    dt = datetime.strptime(due_str, "%Y-%m-%d %H:%M")
+                    c.execute("UPDATE notifications SET due_ts = ? WHERE id = ?",
+                              (_to_ts(dt), row_id))
                 except Exception:
-                    # If helpers are not available or parsing fails, skip silently
+                    # Skip silently if parsing fails
                     pass
 
         conn.commit()
@@ -173,3 +173,57 @@ def set_setting(key: str, value: str) -> None:
             (key, value)
         )
         conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# Timezone helpers (shared between CLI and Web UI)
+# ---------------------------------------------------------------------------
+
+def _get_user_tz():
+    """Return a ZoneInfo for the configured TIMEZONE env var, or None for system local."""
+    tz_name = os.getenv('TIMEZONE', '').strip()
+    if not tz_name:
+        return None
+    try:
+        return ZoneInfo(tz_name)
+    except (ZoneInfoNotFoundError, KeyError):
+        # Only print warning when running in CLI context (web suppresses this)
+        if os.getenv("NOTIFIER_WEB_PASSWORD") is None:
+            print(f"⚠️  Unknown timezone '{tz_name}' — using system local time.")
+        return None
+
+
+def _now_in_tz() -> datetime:
+    """Current time in the configured timezone as a naive datetime."""
+    tz = _get_user_tz()
+    if tz is None:
+        return datetime.now()
+    return datetime.now(tz).replace(tzinfo=None)
+
+
+def _tz_label() -> str:
+    """Short timezone label for display."""
+    tz_name = os.getenv('TIMEZONE', '').strip()
+    return tz_name if tz_name else "system local"
+
+
+def _to_ts(dt: datetime) -> int:
+    """Epoch seconds for a *naive* wall-clock datetime, interpreted in the
+    configured TIMEZONE (or system local if unset).
+
+    A bare ``datetime.timestamp()`` assumes the machine's local zone, which is
+    wrong whenever TIMEZONE differs from the host clock (e.g. a UTC server).
+    All scheduling math must go through this helper.
+    """
+    tz = _get_user_tz()
+    if tz is None:
+        return int(dt.timestamp())
+    return int(dt.replace(tzinfo=tz).timestamp())
+
+
+def _from_ts(ts: int) -> datetime:
+    """Inverse of _to_ts: naive wall-clock datetime in the configured TIMEZONE."""
+    tz = _get_user_tz()
+    if tz is None:
+        return datetime.fromtimestamp(ts)
+    return datetime.fromtimestamp(ts, tz).replace(tzinfo=None)

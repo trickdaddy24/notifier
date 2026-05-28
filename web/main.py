@@ -57,12 +57,12 @@ TEMPLATES_DIR = BASE_DIR / "templates"
 # Use the shared database module from the main notifier package.
 # This ensures the web UI and CLI use exactly the same schema and logic.
 try:
-    from notifier.db import get_db, init_db, DB_PATH, get_setting, set_setting
+    from notifier.db import get_db, init_db, DB_PATH, get_setting, set_setting, _to_ts
 except ImportError:
     # Fallback for when running web/ in isolation (development)
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    from notifier.db import get_db, init_db, DB_PATH, get_setting, set_setting
+    from notifier.db import get_db, init_db, DB_PATH, get_setting, set_setting, _to_ts
 
 
 def get_upcoming_reminders(limit: int = 50):
@@ -334,9 +334,12 @@ async def create_reminder(
         return JSONResponse({"error": "Message is required"}, status_code=400)
 
     try:
+        # Parse the wall-clock time from the browser (naive datetime)
         dt = datetime.fromisoformat(due.replace("T", " "))
         due_str = dt.strftime("%Y-%m-%d %H:%M")
-        due_ts = int(dt.timestamp())
+
+        # Use the shared timezone-aware converter (respects TIMEZONE env var)
+        due_ts = _to_ts(dt)
     except Exception:
         return JSONResponse({"error": "Invalid date/time format"}, status_code=400)
 
