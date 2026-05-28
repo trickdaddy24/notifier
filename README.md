@@ -388,6 +388,14 @@ CREATE TABLE logs (
 
 ---
 
+## Roadmap
+
+See [ROADMAP.md](ROADMAP.md) for planned major features.
+
+The most significant upcoming item is **Multi-User Support + Google OAuth** (open registration, private per-user reminders, OAuth implemented inside FastAPI).
+
+---
+
 ## License
 
 MIT
