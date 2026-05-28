@@ -182,20 +182,21 @@ def login_redirect(request: Request, next_url: str = "/") -> RedirectResponse:
 # Login / Logout helpers (used by routes)
 # ---------------------------------------------------------------------------
 
-def perform_login(password: str) -> Optional[str]:
+def perform_login(username: str, password: str) -> Optional[str]:
     """
-    Attempt to log the user in with the submitted password.
-    Returns a session token on success, or None on failure.
+    Attempt to log the user in with username + password.
+    The password must match the configured one (username is freeform for display).
+    Returns a signed session token on success, or None on failure.
     """
     if not is_auth_enabled():
-        return create_session_token()
+        return create_session_token(username or "admin")
 
     effective_hash = _get_effective_password_hash()
     if not effective_hash:
         return None
 
     if verify_password(password, effective_hash):
-        return create_session_token()
+        return create_session_token(username or "admin")
     return None
 
 

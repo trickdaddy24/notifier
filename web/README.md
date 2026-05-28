@@ -1,48 +1,70 @@
 # Notifier Web UI
 
-This is the new web interface for the Notifier project (work in progress as part of Phase 2).
+**Status**: Early but functional. Web UI + Docker is now the **primary focus** of the project.
 
-## Quick Start (Development)
+The web interface is the recommended way to use Notifier day-to-day. A strong CLI remains available for power users and scripting.
+
+## Quick Start
+
+### Option A: Docker (Recommended)
 
 ```bash
-# From the project root
-pip install fastapi uvicorn python-multipart bcrypt itsdangerous
+# 1. Copy the example env file
+cp .env.example .env
 
-# Set a password (required for login)
-export NOTIFIER_WEB_PASSWORD="your-secure-password-here"
+# 2. Edit .env and set a password
+NOTIFIER_WEB_PASSWORD=your-strong-password-here
 
-# Run the web UI
-python -m uvicorn notifier.web.main:app --reload --port 8000
+# 3. Start with Docker Compose
+docker compose up --build
 ```
 
-Then open http://localhost:8000
+Then open **http://localhost:8000**
 
-## Configuration (.env)
+### Option B: Local (PowerShell / Windows)
+
+```powershell
+cd F:\grok\notifier
+
+# Activate venv
+.\.venv\Scripts\Activate.ps1
+
+# Set password
+$env:NOTIFIER_WEB_PASSWORD = "your-strong-password-here"
+
+# Run (correct command)
+python -m uvicorn --app-dir . web.main:app --reload --port 8000
+```
+
+Open **http://localhost:8000**
+
+## Configuration
+
+Copy `.env.example` → `.env` and fill in at minimum:
 
 ```env
-# --- Web UI Authentication ---
-NOTIFIER_WEB_PASSWORD=change-this-to-something-strong
-# OR (recommended for production)
-# NOTIFIER_WEB_PASSWORD_HASH=$2b$12$your-bcrypt-hash-here
-
-# Optional
-NOTIFIER_WEB_SECRET_KEY=some-long-random-string
-NOTIFIER_WEB_SESSION_MAX_AGE=604800          # 7 days in seconds
+NOTIFIER_WEB_PASSWORD=your-strong-password-here
 ```
 
-## Features (Current)
+Optional but recommended:
+- `NOTIFIER_WEB_SECRET_KEY`
+- `NOTIFIER_WEB_SESSION_MAX_AGE`
 
-- Beautiful modern login form with Tailwind
-- Secure signed cookie sessions
-- Support for `Authorization: Bearer <token>` and `?token=...`
-- Protected routes with automatic redirect to login
-- Simple `/health` and `/api/me` endpoints
-- Works great in Docker
+## Current Features
 
-## Production Notes
+- Secure login (cookie sessions + Bearer token support)
+- Protected routes
+- Clean dark UI (Tailwind via CDN)
+- Health endpoint (`/health`)
+- Works in Docker
 
-- Set `NOTIFIER_WEB_PASSWORD_HASH` (use `bcrypt` to generate)
-- Put the app behind a reverse proxy (Caddy / Nginx / Traefik) with HTTPS
-- Consider setting `secure=True` on the session cookie in production
+## Next Milestones (Web Focus)
 
-This is the foundation. The real dashboard, services management, logs, etc. will be built on top of this auth system.
+- Notification CRUD in the web UI
+- Channel/credential management from the browser
+- Logs viewer
+- Full Docker Compose examples with reverse proxy
+
+---
+
+**Note**: The old Tkinter GUI is now considered legacy. The future is the web interface + Docker.

@@ -73,13 +73,30 @@
                     <i class="fa-solid fa-exclamation-triangle text-red-400 mt-0.5"></i>
                     <div class="text-sm">
                         <span class="font-medium text-red-400">Login failed.</span>
-                        <span class="text-red-300/80">Please check your password and try again.</span>
+                        <span class="text-red-300/80">Please check your username and password.</span>
                     </div>
                 </div>
                 {% endif %}
 
                 <form action="/login" method="POST" class="space-y-5">
                     <input type="hidden" name="next" value="{{ next_url or '/' }}">
+
+                    <!-- Username Field -->
+                    <div>
+                        <label for="username" class="block text-sm font-medium text-zinc-400 mb-1.5">
+                            Username
+                        </label>
+                        <input 
+                            type="text" 
+                            id="username" 
+                            name="username" 
+                            value="admin"
+                            required
+                            autocomplete="username"
+                            class="input-focus w-full bg-zinc-950 border border-zinc-800 focus:border-emerald-600 rounded-2xl px-4 py-3 text-base placeholder-zinc-600"
+                            placeholder="admin"
+                        >
+                    </div>
 
                     <!-- Password Field -->
                     <div>
@@ -119,7 +136,7 @@
                 <div class="mt-6 text-center">
                     <p class="text-xs text-zinc-500">
                         {% if auth_enabled %}
-                            This is a personal instance. Keep your password secure.
+                            Enter any username you like. The password is what secures this instance.
                         {% else %}
                             <span class="text-amber-400">Authentication is currently disabled</span> (dev mode)
                         {% endif %}
