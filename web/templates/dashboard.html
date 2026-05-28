@@ -51,34 +51,59 @@
     </nav>
 
     <div class="flex max-w-7xl mx-auto">
-        <!-- Left Sidebar -->
-        <div class="w-56 bg-zinc-900 border-r border-zinc-800 min-h-screen p-4 hidden md:block">
-            <div class="mb-8">
-                <div class="flex items-center gap-3 mb-6">
-                    <div class="w-8 h-8 bg-emerald-600 rounded-xl flex items-center justify-center">
-                        <i class="fa-solid fa-bell text-white"></i>
+        <!-- Left Sidebar - Only for Configuration -->
+        <div class="w-80 bg-zinc-900 border-r border-zinc-800 min-h-screen p-5 hidden lg:block overflow-y-auto">
+            <div class="sticky top-4 space-y-6">
+                <div>
+                    <h3 class="text-xs uppercase tracking-widest text-zinc-500 mb-3 px-1">Configuration</h3>
+                    
+                    <!-- Notification Services moved to Sidebar -->
+                    <div class="mb-6">
+                        <h4 class="text-sm font-semibold mb-2 px-1">Notification Services</h4>
+                        <div id="channels-list-sidebar" class="space-y-2 text-sm">
+                            <!-- Populated via JS, same as before -->
+                        </div>
                     </div>
-                    <span class="font-display text-xl font-semibold">Notifier</span>
+
+                    <!-- Heartbeat Settings moved to Sidebar -->
+                    <div>
+                        <h4 class="text-sm font-semibold mb-2 px-1">Heartbeat</h4>
+                        <div class="bg-zinc-950 border border-zinc-800 rounded-2xl p-4 text-sm">
+                            <div class="space-y-4">
+                                <div>
+                                    <label class="block text-xs text-zinc-400 mb-1">Interval (hours)</label>
+                                    <div class="flex gap-2">
+                                        <input type="number" id="heartbeat-interval" value="6" min="0"
+                                               class="w-20 bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-1 text-sm">
+                                        <button onclick="saveHeartbeatSettings()"
+                                                class="px-4 py-1 bg-emerald-600 hover:bg-emerald-500 rounded-xl text-xs font-medium">
+                                            Save
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label class="block text-xs text-zinc-400 mb-1">File Location</label>
+                                    <input type="text" id="heartbeat-file-location" 
+                                           class="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-1 text-sm">
+                                    <button onclick="saveHeartbeatSettings()"
+                                            class="mt-1 px-4 py-1 bg-emerald-600 hover:bg-emerald-500 rounded-xl text-xs font-medium">
+                                        Save
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div class="mt-4 pt-3 border-t border-zinc-700">
+                                <button onclick="testHeartbeat()"
+                                        class="w-full px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-xl text-sm flex items-center justify-center gap-2">
+                                    <i class="fa-solid fa-heartbeat"></i>
+                                    <span>Test Heartbeat</span>
+                                </button>
+                                <span id="heartbeat-status" class="text-xs text-zinc-400 block mt-2 text-center"></span>
+                            </div>
+                        </div>
+                    </div>
                 </div>
-            </div>
-
-            <nav class="space-y-1 text-sm">
-                <a href="#reminders" class="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-zinc-800 text-zinc-300 hover:text-white">
-                    <i class="fa-solid fa-list w-4"></i> <span>Reminders</span>
-                </a>
-                <a href="#activity" class="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-zinc-800 text-zinc-300 hover:text-white">
-                    <i class="fa-solid fa-history w-4"></i> <span>Activity</span>
-                </a>
-                <a href="#services" class="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-zinc-800 text-zinc-300 hover:text-white">
-                    <i class="fa-solid fa-plug w-4"></i> <span>Services</span>
-                </a>
-                <a href="#heartbeat" class="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-zinc-800 text-zinc-300 hover:text-white">
-                    <i class="fa-solid fa-heartbeat w-4"></i> <span>Heartbeat</span>
-                </a>
-            </nav>
-
-            <div class="mt-auto pt-8 text-xs text-zinc-500">
-                <div id="live-datetime" class="font-mono"></div>
             </div>
         </div>
 
@@ -211,56 +236,7 @@
             </div>
         </div>
 
-        <!-- Notification Services / Channels -->
-        <div class="mt-8 bg-zinc-900 border border-zinc-800 rounded-3xl p-8">
-            <h2 class="text-xl font-semibold mb-6">Notification Services</h2>
-            <div id="channels-list" class="space-y-4">
-                <div class="text-zinc-400">Loading channels...</div>
-            </div>
-        </div>
-
-        <!-- Heartbeat Settings -->
-        <div class="mt-8 bg-zinc-900 border border-zinc-800 rounded-3xl p-8">
-            <h2 class="text-xl font-semibold mb-6">Heartbeat Settings</h2>
-
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <!-- Interval -->
-                <div>
-                    <label class="block text-sm text-zinc-400 mb-2">Interval (hours)</label>
-                    <div class="flex gap-3">
-                        <input type="number" id="heartbeat-interval" value="6" min="0"
-                               class="w-24 bg-zinc-950 border border-zinc-800 focus:border-emerald-600 rounded-2xl px-4 py-2 text-base">
-                        <button onclick="saveHeartbeatSettings()"
-                                class="px-6 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-2xl text-sm font-medium transition-colors">
-                            Save
-                        </button>
-                    </div>
-                    <p class="text-xs text-zinc-500 mt-1">Set to 0 to disable heartbeat</p>
-                </div>
-
-                <!-- File Location -->
-                <div>
-                    <label class="block text-sm text-zinc-400 mb-2">File Location (shown in message)</label>
-                    <div class="flex gap-3">
-                        <input type="text" id="heartbeat-file-location" 
-                               class="flex-1 bg-zinc-950 border border-zinc-800 focus:border-emerald-600 rounded-2xl px-4 py-2 text-base">
-                        <button onclick="saveHeartbeatSettings()"
-                                class="px-6 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-2xl text-sm font-medium transition-colors">
-                            Save
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-            <div class="mt-6 pt-6 border-t border-zinc-800 flex items-center gap-4">
-                <button onclick="testHeartbeat()"
-                        class="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 rounded-2xl text-sm font-medium flex items-center gap-2 transition-colors">
-                    <i class="fa-solid fa-heartbeat"></i>
-                    <span>Test Heartbeat</span>
-                </button>
-                <span id="heartbeat-status" class="text-sm text-zinc-400"></span>
-            </div>
-        </div>
+        <!-- Main operational content stays here (clean) -->
 
         <div class="mt-6 text-xs text-center text-zinc-500">
             Auth is {% if auth_enabled %}enabled{% else %}disabled (dev mode){% endif %}. 
@@ -657,7 +633,8 @@
         // === Notification Channels UI ===
 
         async function loadChannels() {
-            const container = document.getElementById('channels-list');
+            // Populate sidebar version (preferred)
+            const container = document.getElementById('channels-list-sidebar') || document.getElementById('channels-list');
             if (!container) return;
 
             try {
@@ -681,23 +658,23 @@
                     }
 
                     html += `
-                        <div class="bg-zinc-950 border border-zinc-800 rounded-2xl p-5">
+                        <div class="bg-zinc-950 border border-zinc-800 rounded-2xl p-4">
                             <div class="flex justify-between items-center">
                                 <div class="flex items-center gap-3">
-                                    <span class="text-2xl">${channel.emoji || ''}</span>
+                                    <span class="text-xl">${channel.emoji || ''}</span>
                                     <div>
-                                        <div class="font-medium">${channel.label}</div>
+                                        <div class="font-medium text-sm">${channel.label}</div>
                                         <div>${status}</div>
                                         ${statusInfo}
                                     </div>
                                 </div>
-                                <div class="flex gap-2">
+                                <div class="flex gap-1">
                                     <button onclick="configureChannel('${channel.name}')" 
-                                            class="px-4 py-1.5 text-sm bg-zinc-700 hover:bg-zinc-600 rounded-xl">
-                                        Configure
+                                            class="px-3 py-1 text-xs bg-zinc-700 hover:bg-zinc-600 rounded-lg">
+                                        Edit
                                     </button>
                                     <button onclick="testChannel('${channel.name}')" 
-                                            class="px-4 py-1.5 text-sm bg-blue-700 hover:bg-blue-600 rounded-xl">
+                                            class="px-3 py-1 text-xs bg-blue-700 hover:bg-blue-600 rounded-lg">
                                         Test
                                     </button>
                                 </div>
@@ -706,7 +683,7 @@
                     `;
                 });
 
-                container.innerHTML = html || '<div class="text-zinc-400">No channels available.</div>';
+                container.innerHTML = html || '<div class="text-zinc-400 text-xs">No channels.</div>';
 
             } catch (err) {
                 container.innerHTML = '<div class="text-red-400">Failed to load channels.</div>';
