@@ -8,6 +8,7 @@ reverse-proxy + middleware combinations trigger in the Starlette layer.
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
 
@@ -16,6 +17,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 import jinja2
+import os
 import sqlite3
 import time
 from datetime import datetime
@@ -33,22 +35,39 @@ from .auth import (
 BASE_DIR = Path(__file__).parent
 TEMPLATES_DIR = BASE_DIR / "templates"
 
-# Use the mounted data volume so the web UI and CLI/daemon share the same database
-DB_PATH = Path("/app/data/notifications.db")
+# Database path - configurable for Docker vs local development
+# - In Docker: defaults to the mounted volume /app/data/notifications.db
+# - Locally: falls back to ./notifications.db in the current working directory
+if os.getenv("NOTIFIER_DB_PATH"):
+    DB_PATH = Path(os.getenv("NOTIFIER_DB_PATH"))
+elif Path("/.dockerenv").exists() or os.getenv("DOCKER_CONTAINER"):
+    DB_PATH = Path("/app/data/notifications.db")
+else:
+    # Local development default
+    DB_PATH = Path("notifications.db")
+
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 
 def get_db():
-    conn = sqlite3.connect(str(DB_PATH), timeout=10)
+    """Get a thread-safe SQLite connection with good defaults."""
+    conn = sqlite3.connect(str(DB_PATH), timeout=15)
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA synchronous=NORMAL;")
+    conn.row_factory = sqlite3.Row
     return conn
 
 
-def init_notifications_table():
-    """Ensure the notifications table exists (same schema as the main notifier)."""
+def init_db():
+    """
+    Initialize the database schema.
+    This is the single source of truth for the notifications table
+    (kept in sync with the main notifier.py logic).
+    """
     with get_db() as conn:
         c = conn.cursor()
+
+        # Main notifications table (matches the monolith)
         c.execute('''
             CREATE TABLE IF NOT EXISTS notifications (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -60,13 +79,39 @@ def init_notifications_table():
                 repeat_time TEXT DEFAULT NULL
             )
         ''')
+
+        # Audit log table (used by the CLI daemon)
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS logs (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                notification_id INTEGER,
+                timestamp       TEXT NOT NULL,
+                channel         TEXT NOT NULL,
+                status          TEXT NOT NULL,
+                response        TEXT
+            )
+        ''')
+
+        # Indexes
         c.execute("CREATE INDEX IF NOT EXISTS idx_notifications_due ON notifications(sent, due_ts)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_logs_time ON logs(timestamp)")
+
+        # Lightweight migrations for older databases
+        for col, definition in [
+            ("due_ts", "INTEGER DEFAULT 0"),
+            ("recurrence", "TEXT DEFAULT NULL"),
+            ("repeat_time", "TEXT DEFAULT NULL"),
+        ]:
+            try:
+                c.execute(f"ALTER TABLE notifications ADD COLUMN {col} {definition}")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+
         conn.commit()
 
 
 def get_upcoming_reminders(limit: int = 50):
     """Return upcoming (not yet sent) reminders, sorted by due time."""
-    init_notifications_table()
     with get_db() as conn:
         c = conn.cursor()
         c.execute("""
@@ -80,17 +125,28 @@ def get_upcoming_reminders(limit: int = 50):
 
     reminders = []
     now = int(time.time())
-    for rid, msg, due_time, due_ts, rec, rep in rows:
+    for row in rows:
         reminders.append({
-            "id": rid,
-            "message": msg,
-            "due_time": due_time,
-            "due_ts": due_ts,
-            "recurrence": rec,
-            "repeat_time": rep,
-            "is_overdue": due_ts > 0 and due_ts < now,
+            "id": row["id"],
+            "message": row["message"],
+            "due_time": row["due_time"],
+            "due_ts": row["due_ts"],
+            "recurrence": row["recurrence"],
+            "repeat_time": row["repeat_time"],
+            "is_overdue": row["due_ts"] > 0 and row["due_ts"] < now,
         })
     return reminders
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Run on application startup and shutdown."""
+    # Initialize database schema on startup — this is critical
+    print(f"[notifier-web] Initializing database at {DB_PATH}")
+    init_db()
+    print("[notifier-web] Database ready.")
+    yield
+    # Optional shutdown logic can go here
 
 # Raw Jinja2 environment — no Starlette wrapper, no caching tricks that can break
 jinja_env = jinja2.Environment(
@@ -109,7 +165,7 @@ def render_template(name: str, context: dict) -> str:
     return template.render(context)
 
 
-app = FastAPI(title="Notifier Web")
+app = FastAPI(title="Notifier Web", lifespan=lifespan)
 
 static_dir = BASE_DIR / "static"
 if static_dir.exists() and any(static_dir.iterdir()):
@@ -194,7 +250,24 @@ async def logout_get():
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "auth": "on" if is_auth_enabled() else "off"}
+    """Health check — useful for Docker and monitoring."""
+    db_ok = False
+    db_path = str(DB_PATH)
+    try:
+        with get_db() as conn:
+            conn.execute("SELECT 1 FROM notifications LIMIT 1")
+            db_ok = True
+    except Exception:
+        db_ok = False
+
+    return {
+        "status": "ok" if db_ok else "degraded",
+        "auth": "on" if is_auth_enabled() else "off",
+        "database": {
+            "path": db_path,
+            "connected": db_ok,
+        }
+    }
 
 
 @app.get("/api/me")
@@ -233,7 +306,6 @@ async def create_reminder(
         # For daily we also store the time portion for the legacy scheduler
         repeat_time = dt.strftime("%H:%M")
 
-    init_notifications_table()
     with get_db() as conn:
         c = conn.cursor()
         c.execute(

@@ -10,6 +10,8 @@ services:
     environment:
       - NOTIFIER_WEB_PASSWORD=${NOTIFIER_WEB_PASSWORD}
       - TIMEZONE=${TIMEZONE:-America/New_York}
+      # Database path (matches the volume mount)
+      - NOTIFIER_DB_PATH=/app/data/notifications.db
     volumes:
       - ./data:/app/data
       - ./.env:/app/.env:ro
