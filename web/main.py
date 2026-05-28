@@ -11,6 +11,8 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
+import threading
+import time as time_module
 
 from fastapi import FastAPI, Depends, Form, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
@@ -19,8 +21,9 @@ from fastapi.staticfiles import StaticFiles
 import jinja2
 import os
 import sqlite3
-import time
 from datetime import datetime
+
+import schedule
 
 from .auth import (
     perform_login,
@@ -30,6 +33,14 @@ from .auth import (
     is_auth_enabled,
     login_redirect,
 )
+
+# Import shared notification delivery
+try:
+    from notifier.notifications import send_notifications, set_quiet_mode
+except ImportError:
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from notifier.notifications import send_notifications, set_quiet_mode
 
 
 BASE_DIR = Path(__file__).parent
@@ -74,6 +85,26 @@ def get_upcoming_reminders(limit: int = 50):
     return reminders
 
 
+_scheduler_thread: threading.Thread | None = None
+_scheduler_running = False
+
+
+def _run_scheduler_loop():
+    """Background thread that runs the notification scheduler."""
+    global _scheduler_running
+    _scheduler_running = True
+    set_quiet_mode(True)  # Don't spam console from inside web container
+
+    # Run every minute
+    schedule.every(1).minutes.do(send_notifications)
+
+    print("[notifier-web] Background notification scheduler started (every 1 minute).")
+
+    while _scheduler_running:
+        schedule.run_pending()
+        time_module.sleep(1)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Run on application startup and shutdown."""
@@ -81,11 +112,21 @@ async def lifespan(app: FastAPI):
     init_db(backfill_legacy=False)
     print("[notifier-web] Database ready using shared schema.")
 
-    # Optional: Seed sample data for demos / first runs
+    # Optional: Seed sample data
     if os.getenv("SEED_SAMPLE_DATA", "0").lower() in ("1", "true", "yes"):
         _seed_sample_data()
 
+    # Start background scheduler thread
+    global _scheduler_thread
+    _scheduler_thread = threading.Thread(target=_run_scheduler_loop, daemon=True)
+    _scheduler_thread.start()
+
     yield
+
+    # Shutdown
+    global _scheduler_running
+    _scheduler_running = False
+    print("[notifier-web] Scheduler shutdown requested.")
 
 
 def _seed_sample_data():

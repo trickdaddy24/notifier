@@ -14,8 +14,9 @@ COPY web/requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy shared database module (so web can import real init_db from notifier.db)
+# Copy shared modules for database + notification delivery
 COPY notifier/db.py ./notifier/db.py
+COPY notifier/notifications.py ./notifier/notifications.py
 COPY notifier/__init__.py ./notifier/__init__.py
 
 # Copy web application code
