@@ -17,7 +17,7 @@ from typing import Any
 
 import requests
 
-from .db import get_db, init_db
+from .db import get_db, init_db, get_setting, set_setting
 
 # ---------------------------------------------------------------------------
 # Logging setup (used by both CLI and web container)
@@ -47,6 +47,46 @@ def set_quiet_mode(quiet: bool):
     _QUIET = quiet
 
 
+# ---------------------------------------------------------------------------
+# Credential Management (supports both .env and Database via web UI)
+# ---------------------------------------------------------------------------
+
+def _get_credential(channel: str, key: str) -> str:
+    """
+    Get a credential for a channel.
+    Priority: Database setting > Environment variable
+    """
+    # Try database first (set via web UI)
+    db_key = f"{channel}_{key}".lower()
+    value = get_setting(db_key)
+    if value:
+        return value
+
+    # Fallback to environment variable (traditional .env method)
+    env_key = f"{channel.upper()}_{key.upper()}"
+    return os.getenv(env_key, "")
+
+
+def get_channel_credentials(channel_name: str) -> dict:
+    """Return all configured credentials for a given channel."""
+    creds = {}
+    channel = next((c for c in CHANNELS if c["name"] == channel_name), None)
+    if not channel:
+        return creds
+
+    for field in channel.get("fields", []):
+        key = field["key"].replace(f"{channel_name.upper()}_", "")
+        creds[key] = _get_credential(channel_name, key)
+
+    return creds
+
+
+def set_channel_credential(channel_name: str, key: str, value: str) -> None:
+    """Save a credential for a channel into the database."""
+    db_key = f"{channel_name}_{key}".lower()
+    set_setting(db_key, value)
+
+
 def _cprint(*args, **kwargs):
     if not _QUIET:
         print(*args, **kwargs)
@@ -57,8 +97,8 @@ def _cprint(*args, **kwargs):
 # ---------------------------------------------------------------------------
 
 def send_telegram_message(message: str) -> tuple[bool, str]:
-    bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
-    chat_id = os.getenv('TELEGRAM_CHAT_ID')
+    bot_token = _get_credential("telegram", "bot_token")
+    chat_id = _get_credential("telegram", "chat_id")
 
     if not bot_token or not chat_id:
         missing = []
@@ -66,7 +106,7 @@ def send_telegram_message(message: str) -> tuple[bool, str]:
             missing.append("TELEGRAM_BOT_TOKEN")
         if not chat_id:
             missing.append("TELEGRAM_CHAT_ID")
-        msg = f"Missing {', '.join(missing)} in .env file"
+        msg = f"Missing {', '.join(missing)} in .env or database"
         logger.warning(msg)
         return False, msg
 
@@ -87,7 +127,7 @@ def send_telegram_message(message: str) -> tuple[bool, str]:
 
 
 def send_discord_message(message: str) -> tuple[bool, str]:
-    webhook_url = os.getenv('DISCORD_WEBHOOK_URL')
+    webhook_url = _get_credential("discord", "webhook_url")
     if not webhook_url:
         return False, "Missing DISCORD_WEBHOOK_URL"
     try:
@@ -276,8 +316,8 @@ def get_external_ip():
 
 def send_heartbeat():
     """Send a system heartbeat to Telegram (if configured)."""
-    bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
-    chat_id = os.getenv('TELEGRAM_CHAT_ID')
+    bot_token = _get_credential("telegram", "bot_token")
+    chat_id = _get_credential("telegram", "chat_id")
 
     if not bot_token or not chat_id:
         logger.debug("Heartbeat skipped — Telegram not configured")

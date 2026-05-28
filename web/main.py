@@ -36,13 +36,19 @@ from .auth import (
     login_redirect,
 )
 
-# Import shared notification delivery
+# Import shared notification delivery + channel management
 try:
-    from notifier.notifications import send_notifications, send_heartbeat, set_quiet_mode
+    from notifier.notifications import (
+        send_notifications, send_heartbeat, set_quiet_mode,
+        CHANNELS, get_channel_credentials, set_channel_credential
+    )
 except ImportError:
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    from notifier.notifications import send_notifications, send_heartbeat, set_quiet_mode
+    from notifier.notifications import (
+        send_notifications, send_heartbeat, set_quiet_mode,
+        CHANNELS, get_channel_credentials, set_channel_credential
+    )
 
 
 BASE_DIR = Path(__file__).parent
@@ -531,4 +537,95 @@ async def test_heartbeat(user: Optional[str] = Depends(get_current_user)):
         return {"success": True, "message": "Heartbeat test message sent to Telegram!"}
     except Exception as e:
         logger.exception("Heartbeat test failed")
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+# ── Notification Channels Management API ─────────────────────────────────────
+
+@app.get("/api/channels")
+async def list_channels(user: Optional[str] = Depends(get_current_user)):
+    """List all available notification channels and whether they are configured."""
+    if user is None:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    result = []
+    for chan in CHANNELS:
+        creds = get_channel_credentials(chan["name"])
+        configured = all(bool(v) for v in creds.values()) if creds else False
+
+        result.append({
+            "name": chan["name"],
+            "label": chan.get("label", chan["name"].title()),
+            "emoji": chan.get("emoji", ""),
+            "configured": configured,
+            "fields": chan.get("fields", [])
+        })
+
+    return {"channels": result}
+
+
+@app.get("/api/channels/{channel_name}")
+async def get_channel_details(channel_name: str, user: Optional[str] = Depends(get_current_user)):
+    if user is None:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    channel = next((c for c in CHANNELS if c["name"] == channel_name), None)
+    if not channel:
+        return JSONResponse({"error": "Channel not found"}, status_code=404)
+
+    creds = get_channel_credentials(channel_name)
+
+    return {
+        "name": channel["name"],
+        "label": channel.get("label", channel_name.title()),
+        "fields": channel.get("fields", []),
+        "credentials": {k: v for k, v in creds.items()}   # Return current values (masked in UI later)
+    }
+
+
+@app.post("/api/channels/{channel_name}")
+async def save_channel_credentials(
+    channel_name: str,
+    credentials: dict = Form(...),   # Expect JSON-like dict from frontend
+    user: Optional[str] = Depends(get_current_user)
+):
+    if user is None:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    channel = next((c for c in CHANNELS if c["name"] == channel_name), None)
+    if not channel:
+        return JSONResponse({"error": "Channel not found"}, status_code=404)
+
+    try:
+        for key, value in credentials.items():
+            if value:  # Only save non-empty values
+                set_channel_credential(channel_name, key.lower().replace(f"{channel_name}_", ""), value)
+
+        logger.info(f"User '{user}' updated credentials for channel: {channel_name}")
+        return {"success": True, "message": f"{channel.get('label', channel_name)} credentials saved."}
+    except Exception as e:
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/channels/{channel_name}/test")
+async def test_channel(channel_name: str, user: Optional[str] = Depends(get_current_user)):
+    """Send a test message through a specific channel."""
+    if user is None:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    channel = next((c for c in CHANNELS if c["name"] == channel_name), None)
+    if not channel:
+        return JSONResponse({"error": "Channel not found"}, status_code=404)
+
+    send_func = channel.get("send")
+    if not send_func:
+        return JSONResponse({"error": "Test not supported for this channel"}, status_code=400)
+
+    try:
+        success, response = send_func(f"✅ Test message from Notifier Web UI — {channel.get('label', channel_name)}")
+        if success:
+            return {"success": True, "message": f"Test message sent via {channel.get('label', channel_name)}!"}
+        else:
+            return JSONResponse({"success": False, "error": response}, status_code=400)
+    except Exception as e:
         return JSONResponse({"success": False, "error": str(e)}, status_code=500)

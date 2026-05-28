@@ -147,6 +147,14 @@
             </div>
         </div>
 
+        <!-- Notification Services / Channels -->
+        <div class="mt-8 bg-zinc-900 border border-zinc-800 rounded-3xl p-8">
+            <h2 class="text-xl font-semibold mb-6">Notification Services</h2>
+            <div id="channels-list" class="space-y-4">
+                <div class="text-zinc-400">Loading channels...</div>
+            </div>
+        </div>
+
         <!-- Heartbeat Settings -->
         <div class="mt-8 bg-zinc-900 border border-zinc-800 rounded-3xl p-8">
             <h2 class="text-xl font-semibold mb-6">Heartbeat Settings</h2>
@@ -466,6 +474,97 @@
                 statusEl.textContent = '❌ Network error';
             }
         }
+
+        // === Notification Channels UI ===
+
+        async function loadChannels() {
+            const container = document.getElementById('channels-list');
+            if (!container) return;
+
+            try {
+                const res = await fetch('/api/channels');
+                const data = await res.json();
+
+                let html = '';
+                data.channels.forEach(channel => {
+                    const status = channel.configured 
+                        ? '<span class="text-emerald-400 text-xs">Configured</span>' 
+                        : '<span class="text-amber-400 text-xs">Not configured</span>';
+
+                    html += `
+                        <div class="bg-zinc-950 border border-zinc-800 rounded-2xl p-5">
+                            <div class="flex justify-between items-center">
+                                <div class="flex items-center gap-3">
+                                    <span class="text-2xl">${channel.emoji || ''}</span>
+                                    <div>
+                                        <div class="font-medium">${channel.label}</div>
+                                        <div>${status}</div>
+                                    </div>
+                                </div>
+                                <div class="flex gap-2">
+                                    <button onclick="configureChannel('${channel.name}')" 
+                                            class="px-4 py-1.5 text-sm bg-zinc-700 hover:bg-zinc-600 rounded-xl">
+                                        Configure
+                                    </button>
+                                    <button onclick="testChannel('${channel.name}')" 
+                                            class="px-4 py-1.5 text-sm bg-blue-700 hover:bg-blue-600 rounded-xl">
+                                        Test
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+
+                container.innerHTML = html || '<div class="text-zinc-400">No channels available.</div>';
+
+            } catch (err) {
+                container.innerHTML = '<div class="text-red-400">Failed to load channels.</div>';
+            }
+        }
+
+        async function configureChannel(channelName) {
+            // For now, simple prompt-based configuration (can be improved to modal later)
+            const detailsRes = await fetch(`/api/channels/${channelName}`);
+            const details = await detailsRes.json();
+
+            let creds = {};
+            for (let field of details.fields) {
+                const key = field.key.replace(`${channelName.toUpperCase()}_`, '');
+                const current = details.credentials[key] || '';
+                const val = prompt(`Enter ${field.prompt || key} (current: ${current ? '***' : 'empty'})`, current);
+                if (val !== null) {
+                    creds[field.key] = val;
+                }
+            }
+
+            if (Object.keys(creds).length === 0) return;
+
+            const formData = new FormData();
+            formData.append('credentials', JSON.stringify(creds));
+
+            const res = await fetch(`/api/channels/${channelName}`, {
+                method: 'POST',
+                body: formData
+            });
+            const data = await res.json();
+
+            alert(data.message || data.error);
+            loadChannels(); // refresh list
+        }
+
+        async function testChannel(channelName) {
+            const res = await fetch(`/api/channels/${channelName}/test`, { method: 'POST' });
+            const data = await res.json();
+            alert(data.success ? data.message : (data.error || 'Test failed'));
+        }
+
+        // Load channels on page load
+        window.addEventListener('load', function() {
+            loadLogs();
+            loadHeartbeatSettings();
+            loadChannels();
+        });
     </script>
 </body>
 </html>
