@@ -553,12 +553,26 @@ async def list_channels(user: Optional[str] = Depends(get_current_user)):
         creds = get_channel_credentials(chan["name"])
         configured = all(bool(v) for v in creds.values()) if creds else False
 
+        # Get latest success/failure for overview
+        with get_db() as conn:
+            c = conn.cursor()
+            c.execute("""
+                SELECT 
+                    MAX(CASE WHEN status = 'SUCCESS' THEN timestamp END) as last_success,
+                    MAX(CASE WHEN status IN ('FAILED', 'ERROR') THEN timestamp END) as last_failure
+                FROM logs 
+                WHERE channel = ?
+            """, (chan["name"],))
+            row = c.fetchone()
+
         result.append({
             "name": chan["name"],
             "label": chan.get("label", chan["name"].title()),
             "emoji": chan.get("emoji", ""),
             "configured": configured,
-            "fields": chan.get("fields", [])
+            "fields": chan.get("fields", []),
+            "last_success": row["last_success"] if row else None,
+            "last_failure": row["last_failure"] if row else None
         })
 
     return {"channels": result}
@@ -575,11 +589,25 @@ async def get_channel_details(channel_name: str, user: Optional[str] = Depends(g
 
     creds = get_channel_credentials(channel_name)
 
+    # Get last success and last failure timestamps for this channel
+    with get_db() as conn:
+        c = conn.cursor()
+        c.execute("""
+            SELECT 
+                MAX(CASE WHEN status = 'SUCCESS' THEN timestamp END) as last_success,
+                MAX(CASE WHEN status IN ('FAILED', 'ERROR') THEN timestamp END) as last_failure
+            FROM logs 
+            WHERE channel = ?
+        """, (channel_name,))
+        row = c.fetchone()
+
     return {
         "name": channel["name"],
         "label": channel.get("label", channel_name.title()),
         "fields": channel.get("fields", []),
-        "credentials": {k: v for k, v in creds.items()}   # Return current values (masked in UI later)
+        "credentials": {k: v for k, v in creds.items()},
+        "last_success": row["last_success"] if row else None,
+        "last_failure": row["last_failure"] if row else None
     }
 
 
@@ -610,6 +638,30 @@ async def save_channel_credentials(
         return JSONResponse({"success": False, "error": "Invalid data format sent from browser"}, status_code=400)
     except Exception as e:
         logger.exception("Failed to save channel credentials")
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.delete("/api/channels/{channel_name}")
+async def clear_channel_credentials(channel_name: str, user: Optional[str] = Depends(get_current_user)):
+    """Clear all credentials for a channel."""
+    if user is None:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    channel = next((c for c in CHANNELS if c["name"] == channel_name), None)
+    if not channel:
+        return JSONResponse({"error": "Channel not found"}, status_code=404)
+
+    try:
+        with get_db() as conn:
+            c = conn.cursor()
+            for field in channel.get("fields", []):
+                key = field["key"].lower()
+                c.execute("DELETE FROM settings WHERE key = ?", (key,))
+            conn.commit()
+
+        logger.info(f"User '{user}' cleared credentials for channel: {channel_name}")
+        return {"success": True, "message": f"{channel.get('label', channel_name)} credentials cleared."}
+    except Exception as e:
         return JSONResponse({"success": False, "error": str(e)}, status_code=500)
 
 
