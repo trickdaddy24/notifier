@@ -11,14 +11,31 @@ Both the CLI (`notifier.py`) and the web UI can import from here.
 from __future__ import annotations
 
 import os
-import time
 import logging
 from datetime import datetime
-from typing import Callable, Any
+from typing import Any
 
 import requests
 
 from .db import get_db, init_db
+
+# ---------------------------------------------------------------------------
+# Logging setup (used by both CLI and web container)
+# ---------------------------------------------------------------------------
+logger = logging.getLogger("notifier.notifications")
+
+def configure_logging(level: int = logging.INFO):
+    """Call this once at startup (web lifespan or CLI)."""
+    if not logger.handlers:
+        handler = logging.StreamHandler()
+        formatter = logging.Formatter(
+            "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
+        )
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+        logger.setLevel(level)
+        logger.propagate = False
+    return logger
 
 # ---------------------------------------------------------------------------
 # Quiet mode for when running inside web container (no terminal spam)
@@ -42,17 +59,31 @@ def _cprint(*args, **kwargs):
 def send_telegram_message(message: str) -> tuple[bool, str]:
     bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
     chat_id = os.getenv('TELEGRAM_CHAT_ID')
+
     if not bot_token or not chat_id:
-        return False, "Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID"
+        missing = []
+        if not bot_token:
+            missing.append("TELEGRAM_BOT_TOKEN")
+        if not chat_id:
+            missing.append("TELEGRAM_CHAT_ID")
+        msg = f"Missing {', '.join(missing)} in .env file"
+        logger.warning(msg)
+        return False, msg
+
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     try:
         r = requests.post(url, json={"chat_id": chat_id, "text": message}, timeout=10)
         if r.status_code == 200:
+            logger.info("Telegram message sent successfully")
             _cprint("✅ Telegram message sent!")
-            return True, f"HTTP {r.status_code}"
-        return False, f"HTTP {r.status_code} - {r.text}"
+            return True, "Sent successfully"
+        else:
+            error_msg = f"Telegram API error {r.status_code}: {r.text[:300]}"
+            logger.error(error_msg)
+            return False, error_msg
     except requests.exceptions.RequestException as e:
-        return False, str(e)
+        logger.error(f"Telegram request failed: {e}")
+        return False, f"Network error: {str(e)}"
 
 
 def send_discord_message(message: str) -> tuple[bool, str]:
@@ -146,8 +177,7 @@ def _deliver(channel: dict, message: str, subject: str | None = None) -> tuple[b
 def send_notifications(verbose: bool = False, only_id: int | None = None) -> None:
     """
     Main function that finds due notifications and delivers them.
-
-    This is the function the scheduler will call periodically.
+    Called by APScheduler every minute (and manually via CLI).
     """
     now_ts = int(time.time())
 
@@ -169,19 +199,32 @@ def send_notifications(verbose: bool = False, only_id: int | None = None) -> Non
 
         pending = c.fetchall()
 
+        if not pending:
+            return
+
+        logger.info(f"Found {len(pending)} due notification(s) to send")
+
         for row in pending:
             nid, msg, orig_due_ts, recurrence, repeat_time = row
+            full_msg = f"⏰ Reminder: {msg}"
 
-            if verbose:
-                print(f"Sending: {msg}")
+            logger.info(f"Processing reminder #{nid}: {msg[:80]}...")
 
             any_success = False
-            full_msg = f"⏰ Reminder: {msg}"
 
             for chan in CHANNELS:
                 ok, resp = _deliver(chan, full_msg)
+
                 status = "SUCCESS" if ok else ("SKIPPED" if "Missing" in resp else "FAILED")
-                # Log to DB
+
+                # Always log the attempt
+                log_message = f"Reminder #{nid} → {chan['name']}: {status} ({resp})"
+                if ok:
+                    logger.info(log_message)
+                else:
+                    logger.warning(log_message)
+
+                # Write to DB logs table
                 try:
                     ts = datetime.utcnow().isoformat()
                     c.execute(
@@ -189,15 +232,17 @@ def send_notifications(verbose: bool = False, only_id: int | None = None) -> Non
                         "VALUES (?, ?, ?, ?, ?)",
                         (nid, ts, chan["name"], status, resp[:500]),
                     )
-                except Exception:
-                    pass
+                except Exception as db_err:
+                    logger.error(f"Failed to write log for reminder #{nid}: {db_err}")
 
                 if ok:
                     any_success = True
 
             if any_success:
                 c.execute("UPDATE notifications SET sent=1 WHERE id=?", (nid,))
-                # TODO: handle recurrence creation (copy logic from original if needed)
-                conn.commit()
+                logger.info(f"Reminder #{nid} marked as sent")
             else:
-                conn.commit()
+                logger.error(f"Reminder #{nid} failed on all channels")
+
+            # TODO: Add recurrence handling here (copy from original notifier.py when needed)
+            conn.commit()

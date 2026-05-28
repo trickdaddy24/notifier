@@ -20,6 +20,7 @@ import jinja2
 import os
 import sqlite3
 import time
+import logging
 from datetime import datetime
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -92,6 +93,13 @@ scheduler: BackgroundScheduler | None = None
 async def lifespan(app: FastAPI):
     """Run on application startup and shutdown."""
     global scheduler
+
+    # Setup proper logging for the web container
+    from notifier.notifications import configure_logging
+    configure_logging()
+
+    logger = logging.getLogger("notifier.web")
+    logger.info("Notifier Web starting up...")
 
     print(f"[notifier-web] Initializing database at {DB_PATH} (using shared notifier.db)")
     init_db(backfill_legacy=False)
@@ -344,24 +352,52 @@ async def delete_reminder(
 
 @app.post("/api/test-telegram")
 async def test_telegram(user: Optional[str] = Depends(get_current_user)):
-    """Send a test message to Telegram using the configured credentials."""
+    """
+    Send a test message via Telegram.
+    Returns very clear error messages to help the user debug configuration.
+    """
     if user is None:
         return JSONResponse({"error": "unauthorized"}, status_code=401)
 
     try:
         from notifier.notifications import send_telegram_message
-        success, response = send_telegram_message(
-            f"✅ Test message from Notifier Web UI\n"
+
+        test_message = (
+            f"✅ Test from Notifier Web UI (v2.2.0)\n"
             f"User: {user}\n"
             f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
         )
 
+        success, response = send_telegram_message(test_message)
+
         if success:
-            return {"success": True, "message": "Test message sent to Telegram!"}
+            logger.info(f"User '{user}' successfully sent Telegram test message")
+            return {
+                "success": True,
+                "message": "✅ Test message sent successfully to Telegram!"
+            }
         else:
+            # Give the user actionable advice
+            if "Missing" in response:
+                helpful = (
+                    f"{response}\n\n"
+                    "→ Please add these two lines to your .env file on the server:\n"
+                    "TELEGRAM_BOT_TOKEN=your_bot_token\n"
+                    "TELEGRAM_CHAT_ID=your_chat_id\n\n"
+                    "Then run: docker compose -f compose.yml up -d --force-recreate"
+                )
+            else:
+                helpful = response
+
+            logger.warning(f"Telegram test failed for user '{user}': {response}")
             return JSONResponse(
-                {"success": False, "error": f"Failed to send: {response}"},
+                {"success": False, "error": helpful},
                 status_code=400
             )
+
     except Exception as e:
-        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+        logger.exception("Unexpected error in /api/test-telegram")
+        return JSONResponse(
+            {"success": False, "error": f"Unexpected error: {str(e)}"},
+            status_code=500
+        )

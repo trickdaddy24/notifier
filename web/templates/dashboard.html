@@ -252,12 +252,13 @@
                 const data = await res.json();
 
                 if (data.success) {
-                    alert('✅ ' + data.message);
+                    alert(data.message);
                 } else {
-                    alert('❌ ' + (data.error || 'Failed to send test message'));
+                    // Show the full helpful error message (supports newlines)
+                    alert("Telegram Test Failed:\n\n" + (data.error || "Unknown error"));
                 }
             } catch (err) {
-                alert('❌ Network error while testing Telegram');
+                alert("❌ Network error while testing Telegram");
             }
         }
 
