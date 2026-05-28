@@ -5,7 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [v2.1.0] - 2026-05-19  *(Latest)*
+## [v2.2.0] - 2026-05-28  *(Latest)*
+
+### Added
+- Major Phase 2 web UI release: Complete web interface with secure authentication (bcrypt + itsdangerous signed cookies), username + password login form, fully functional "Add Reminder" modal with date/time + recurrence support, real upcoming reminders list with delete capability.
+- Database architecture refactor: Introduced shared `notifier/db.py` module as single source of truth for schema, connections, and initialization. Both CLI and web now use the exact same `init_db()` logic.
+- Docker improvements: Proper FastAPI lifespan-based database initialization on startup, configurable `NOTIFIER_DB_PATH`, better health checks.
+- Documentation: Added comprehensive `ROADMAP.md` tracking future multi-user + Google OAuth work (open registration, private per-user data).
+- Developer experience: Optional `SEED_SAMPLE_DATA` for demo reminders, improved error handling on reminder endpoints.
+
+### Changed
+- Web container now imports from the main `notifier` package for database operations.
+- `docker-compose.yml` and `Dockerfile` updated for the new shared DB layer.
+
+## [v2.1.0] - 2026-05-19
 
 ### Added
 
