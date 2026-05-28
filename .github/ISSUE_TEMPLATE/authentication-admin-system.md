@@ -2,7 +2,7 @@
 name: Phase 3 - Full Authentication & Admin System
 about: Request to implement a production-grade authentication, approval, and admin system (Next.js + Auth.js direction)
 title: '[Phase 3] Full Authentication, Approval & Admin System'
-labels: enhancement, auth, roadmap, phase-3
+labels: enhancement, auth, roadmap, phase-3, high-priority, next.js, security, admin-panel
 assignees: ''
 ---
 

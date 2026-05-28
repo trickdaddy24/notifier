@@ -120,6 +120,6 @@ This feature is tracked in the [ROADMAP.md](https://github.com/trickdaddy24/noti
 
 **Priority**: High (Phase 3)
 
-**Suggested Labels**: `enhancement`, `auth`, `roadmap`, `phase-3`, `next.js`
+**Suggested Labels**: `enhancement`, `auth`, `roadmap`, `phase-3`, `high-priority`, `next.js`, `security`, `admin-panel`
 
 Please discuss architecture (Next.js frontend vs full rewrite) before starting implementation.
