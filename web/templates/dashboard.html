@@ -29,6 +29,13 @@
                     <i class="fa-solid fa-user-circle"></i>
                     <span>{{ user }}</span>
                 </div>
+
+                <!-- Test Telegram Button -->
+                <button onclick="testTelegram()"
+                        class="text-sm flex items-center gap-2 px-3 py-1.5 rounded-2xl bg-blue-600 hover:bg-blue-500 transition-colors text-white">
+                    <i class="fa-brands fa-telegram"></i>
+                    <span class="hidden sm:inline">Test Telegram</span>
+                </button>
                 
                 <form action="/logout" method="post">
                     <button 
@@ -236,6 +243,21 @@
                 }
             } catch (err) {
                 alert('Error deleting reminder');
+            }
+        }
+
+        async function testTelegram() {
+            try {
+                const res = await fetch('/api/test-telegram', { method: 'POST' });
+                const data = await res.json();
+
+                if (data.success) {
+                    alert('✅ ' + data.message);
+                } else {
+                    alert('❌ ' + (data.error || 'Failed to send test message'));
+                }
+            } catch (err) {
+                alert('❌ Network error while testing Telegram');
             }
         }
 

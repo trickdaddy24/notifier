@@ -8,5 +8,5 @@ itsdangerous>=2.1.2
 # For future rich UI
 jinja2>=3.1.3
 
-# Scheduler (used by background notification delivery)
-schedule>=1.2.0
+# Scheduler (APScheduler is much better for web apps than the old 'schedule' library)
+APScheduler>=3.10.0

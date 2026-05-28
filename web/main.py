@@ -11,8 +11,6 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
-import threading
-import time as time_module
 
 from fastapi import FastAPI, Depends, Form, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
@@ -23,7 +21,7 @@ import os
 import sqlite3
 from datetime import datetime
 
-import schedule
+from apscheduler.schedulers.background import BackgroundScheduler
 
 from .auth import (
     perform_login,
@@ -85,29 +83,15 @@ def get_upcoming_reminders(limit: int = 50):
     return reminders
 
 
-_scheduler_thread: threading.Thread | None = None
-_scheduler_running = False
-
-
-def _run_scheduler_loop():
-    """Background thread that runs the notification scheduler."""
-    global _scheduler_running
-    _scheduler_running = True
-    set_quiet_mode(True)  # Don't spam console from inside web container
-
-    # Run every minute
-    schedule.every(1).minutes.do(send_notifications)
-
-    print("[notifier-web] Background notification scheduler started (every 1 minute).")
-
-    while _scheduler_running:
-        schedule.run_pending()
-        time_module.sleep(1)
+# Global APScheduler instance
+scheduler: BackgroundScheduler | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Run on application startup and shutdown."""
+    global scheduler
+
     print(f"[notifier-web] Initializing database at {DB_PATH} (using shared notifier.db)")
     init_db(backfill_legacy=False)
     print("[notifier-web] Database ready using shared schema.")
@@ -116,17 +100,19 @@ async def lifespan(app: FastAPI):
     if os.getenv("SEED_SAMPLE_DATA", "0").lower() in ("1", "true", "yes"):
         _seed_sample_data()
 
-    # Start background scheduler thread
-    global _scheduler_thread
-    _scheduler_thread = threading.Thread(target=_run_scheduler_loop, daemon=True)
-    _scheduler_thread.start()
+    # Start APScheduler (much better than the old 'schedule' library for web apps)
+    set_quiet_mode(True)
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(send_notifications, "interval", minutes=1, id="send_notifications")
+    scheduler.start()
+    print("[notifier-web] APScheduler started — notifications will be sent every minute.")
 
     yield
 
-    # Shutdown
-    global _scheduler_running
-    _scheduler_running = False
-    print("[notifier-web] Scheduler shutdown requested.")
+    # Graceful shutdown
+    if scheduler:
+        scheduler.shutdown(wait=False)
+        print("[notifier-web] APScheduler shut down.")
 
 
 def _seed_sample_data():
@@ -353,3 +339,28 @@ async def delete_reminder(
         return {"success": True}
     except Exception as e:
         return JSONResponse({"error": f"Failed to delete reminder: {str(e)}"}, status_code=500)
+
+
+@app.post("/api/test-telegram")
+async def test_telegram(user: Optional[str] = Depends(get_current_user)):
+    """Send a test message to Telegram using the configured credentials."""
+    if user is None:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    try:
+        from notifier.notifications import send_telegram_message
+        success, response = send_telegram_message(
+            f"✅ Test message from Notifier Web UI\n"
+            f"User: {user}\n"
+            f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        )
+
+        if success:
+            return {"success": True, "message": "Test message sent to Telegram!"}
+        else:
+            return JSONResponse(
+                {"success": False, "error": f"Failed to send: {response}"},
+                status_code=400
+            )
+    except Exception as e:
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
