@@ -35,79 +35,15 @@ from .auth import (
 BASE_DIR = Path(__file__).parent
 TEMPLATES_DIR = BASE_DIR / "templates"
 
-# Database path - configurable for Docker vs local development
-# - In Docker: defaults to the mounted volume /app/data/notifications.db
-# - Locally: falls back to ./notifications.db in the current working directory
-if os.getenv("NOTIFIER_DB_PATH"):
-    DB_PATH = Path(os.getenv("NOTIFIER_DB_PATH"))
-elif Path("/.dockerenv").exists() or os.getenv("DOCKER_CONTAINER"):
-    DB_PATH = Path("/app/data/notifications.db")
-else:
-    # Local development default
-    DB_PATH = Path("notifications.db")
-
-DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-
-
-def get_db():
-    """Get a thread-safe SQLite connection with good defaults."""
-    conn = sqlite3.connect(str(DB_PATH), timeout=15)
-    conn.execute("PRAGMA journal_mode=WAL;")
-    conn.execute("PRAGMA synchronous=NORMAL;")
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
-def init_db():
-    """
-    Initialize the database schema.
-    This is the single source of truth for the notifications table
-    (kept in sync with the main notifier.py logic).
-    """
-    with get_db() as conn:
-        c = conn.cursor()
-
-        # Main notifications table (matches the monolith)
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS notifications (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                message     TEXT NOT NULL,
-                due_time    TEXT NOT NULL,
-                due_ts      INTEGER NOT NULL DEFAULT 0,
-                sent        INTEGER DEFAULT 0,
-                recurrence  TEXT DEFAULT NULL,
-                repeat_time TEXT DEFAULT NULL
-            )
-        ''')
-
-        # Audit log table (used by the CLI daemon)
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS logs (
-                id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                notification_id INTEGER,
-                timestamp       TEXT NOT NULL,
-                channel         TEXT NOT NULL,
-                status          TEXT NOT NULL,
-                response        TEXT
-            )
-        ''')
-
-        # Indexes
-        c.execute("CREATE INDEX IF NOT EXISTS idx_notifications_due ON notifications(sent, due_ts)")
-        c.execute("CREATE INDEX IF NOT EXISTS idx_logs_time ON logs(timestamp)")
-
-        # Lightweight migrations for older databases
-        for col, definition in [
-            ("due_ts", "INTEGER DEFAULT 0"),
-            ("recurrence", "TEXT DEFAULT NULL"),
-            ("repeat_time", "TEXT DEFAULT NULL"),
-        ]:
-            try:
-                c.execute(f"ALTER TABLE notifications ADD COLUMN {col} {definition}")
-            except sqlite3.OperationalError:
-                pass  # Column already exists
-
-        conn.commit()
+# Use the shared database module from the main notifier package.
+# This ensures the web UI and CLI use exactly the same schema and logic.
+try:
+    from notifier.db import get_db, init_db, DB_PATH
+except ImportError:
+    # Fallback for when running web/ in isolation (development)
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from notifier.db import get_db, init_db, DB_PATH
 
 
 def get_upcoming_reminders(limit: int = 50):
@@ -141,12 +77,53 @@ def get_upcoming_reminders(limit: int = 50):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Run on application startup and shutdown."""
-    # Initialize database schema on startup — this is critical
-    print(f"[notifier-web] Initializing database at {DB_PATH}")
-    init_db()
-    print("[notifier-web] Database ready.")
+    print(f"[notifier-web] Initializing database at {DB_PATH} (using shared notifier.db)")
+    init_db(backfill_legacy=False)
+    print("[notifier-web] Database ready using shared schema.")
+
+    # Optional: Seed sample data for demos / first runs
+    if os.getenv("SEED_SAMPLE_DATA", "0").lower() in ("1", "true", "yes"):
+        _seed_sample_data()
+
     yield
-    # Optional shutdown logic can go here
+
+
+def _seed_sample_data():
+    """Seed a few example reminders if the database is empty (dev/demo helper)."""
+    from datetime import timedelta
+
+    with get_db() as conn:
+        c = conn.cursor()
+        c.execute("SELECT COUNT(*) as cnt FROM notifications")
+        count = c.fetchone()["cnt"]
+        if count > 0:
+            return
+
+        samples = [
+            ("Take out the trash", "in 2 hours", None, None),
+            ("Pay electricity bill", "tomorrow 09:00", "weekly", None),
+            ("Call mom", "2025-06-01 18:00", None, None),
+        ]
+        for msg, due, rec, rep in samples:
+            try:
+                if due.startswith("in "):
+                    hours = int(due.split()[1])
+                    due_dt = datetime.now() + timedelta(hours=hours)
+                else:
+                    due_dt = datetime.fromisoformat(due.replace(" ", "T"))
+                due_str = due_dt.strftime("%Y-%m-%d %H:%M")
+                due_ts = int(due_dt.timestamp())
+            except Exception:
+                due_str = due
+                due_ts = 0
+
+            c.execute(
+                "INSERT INTO notifications (message, due_time, due_ts, recurrence, repeat_time) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (msg, due_str, due_ts, rec, rep),
+            )
+        conn.commit()
+        print("[notifier-web] Seeded sample reminders for demo purposes.")
 
 # Raw Jinja2 environment — no Starlette wrapper, no caching tricks that can break
 jinja_env = jinja2.Environment(
@@ -282,8 +259,8 @@ async def api_me(user: Optional[str] = Depends(get_current_user)):
 @app.post("/api/reminders")
 async def create_reminder(
     message: str = Form(...),
-    due: str = Form(...),                    # ISO datetime from <input type="datetime-local">
-    recurrence: str = Form(""),              # "", "daily", "weekly", "monthly"
+    due: str = Form(...),
+    recurrence: str = Form(""),
     user: Optional[str] = Depends(get_current_user),
 ):
     if user is None:
@@ -293,30 +270,30 @@ async def create_reminder(
         return JSONResponse({"error": "Message is required"}, status_code=400)
 
     try:
-        # datetime-local comes as "2025-05-29T14:30"
         dt = datetime.fromisoformat(due.replace("T", " "))
         due_str = dt.strftime("%Y-%m-%d %H:%M")
         due_ts = int(dt.timestamp())
     except Exception:
-        return JSONResponse({"error": "Invalid date/time"}, status_code=400)
+        return JSONResponse({"error": "Invalid date/time format"}, status_code=400)
 
     rec = recurrence or None
     repeat_time = None
     if rec == "daily":
-        # For daily we also store the time portion for the legacy scheduler
         repeat_time = dt.strftime("%H:%M")
 
-    with get_db() as conn:
-        c = conn.cursor()
-        c.execute(
-            "INSERT INTO notifications (message, due_time, due_ts, recurrence, repeat_time) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (message.strip(), due_str, due_ts, rec, repeat_time),
-        )
-        new_id = c.lastrowid
-        conn.commit()
-
-    return {"success": True, "id": new_id, "due": due_str}
+    try:
+        with get_db() as conn:
+            c = conn.cursor()
+            c.execute(
+                "INSERT INTO notifications (message, due_time, due_ts, recurrence, repeat_time) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (message.strip(), due_str, due_ts, rec, repeat_time),
+            )
+            new_id = c.lastrowid
+            conn.commit()
+        return {"success": True, "id": new_id, "due": due_str}
+    except Exception as e:
+        return JSONResponse({"error": f"Database error: {str(e)}"}, status_code=500)
 
 
 @app.delete("/api/reminders/{reminder_id}")
@@ -327,9 +304,11 @@ async def delete_reminder(
     if user is None:
         return JSONResponse({"error": "unauthorized"}, status_code=401)
 
-    with get_db() as conn:
-        c = conn.cursor()
-        c.execute("DELETE FROM notifications WHERE id = ?", (reminder_id,))
-        conn.commit()
-
-    return {"success": True}
+    try:
+        with get_db() as conn:
+            c = conn.cursor()
+            c.execute("DELETE FROM notifications WHERE id = ?", (reminder_id,))
+            conn.commit()
+        return {"success": True}
+    except Exception as e:
+        return JSONResponse({"error": f"Failed to delete reminder: {str(e)}"}, status_code=500)
