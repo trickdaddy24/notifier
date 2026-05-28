@@ -147,6 +147,49 @@
             </div>
         </div>
 
+        <!-- Heartbeat Settings -->
+        <div class="mt-8 bg-zinc-900 border border-zinc-800 rounded-3xl p-8">
+            <h2 class="text-xl font-semibold mb-6">Heartbeat Settings</h2>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- Interval -->
+                <div>
+                    <label class="block text-sm text-zinc-400 mb-2">Interval (hours)</label>
+                    <div class="flex gap-3">
+                        <input type="number" id="heartbeat-interval" value="6" min="0"
+                               class="w-24 bg-zinc-950 border border-zinc-800 focus:border-emerald-600 rounded-2xl px-4 py-2 text-base">
+                        <button onclick="saveHeartbeatSettings()"
+                                class="px-6 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-2xl text-sm font-medium transition-colors">
+                            Save
+                        </button>
+                    </div>
+                    <p class="text-xs text-zinc-500 mt-1">Set to 0 to disable heartbeat</p>
+                </div>
+
+                <!-- File Location -->
+                <div>
+                    <label class="block text-sm text-zinc-400 mb-2">File Location (shown in message)</label>
+                    <div class="flex gap-3">
+                        <input type="text" id="heartbeat-file-location" 
+                               class="flex-1 bg-zinc-950 border border-zinc-800 focus:border-emerald-600 rounded-2xl px-4 py-2 text-base">
+                        <button onclick="saveHeartbeatSettings()"
+                                class="px-6 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-2xl text-sm font-medium transition-colors">
+                            Save
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-6 pt-6 border-t border-zinc-800 flex items-center gap-4">
+                <button onclick="testHeartbeat()"
+                        class="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 rounded-2xl text-sm font-medium flex items-center gap-2 transition-colors">
+                    <i class="fa-solid fa-heartbeat"></i>
+                    <span>Test Heartbeat</span>
+                </button>
+                <span id="heartbeat-status" class="text-sm text-zinc-400"></span>
+            </div>
+        </div>
+
         <div class="mt-6 text-xs text-center text-zinc-500">
             Auth is {% if auth_enabled %}enabled{% else %}disabled (dev mode){% endif %}. 
             Logged in as <span class="font-mono">{{ user }}</span>.
@@ -356,7 +399,73 @@
         // Load logs on page load
         window.addEventListener('load', function() {
             loadLogs();
+            loadHeartbeatSettings();
         });
+
+        async function loadHeartbeatSettings() {
+            try {
+                const res = await fetch('/api/settings/heartbeat');
+                const data = await res.json();
+
+                document.getElementById('heartbeat-interval').value = data.interval || 6;
+                document.getElementById('heartbeat-file-location').value = data.file_location || '/app (Docker)';
+            } catch (err) {
+                console.error('Failed to load heartbeat settings', err);
+            }
+        }
+
+        async function saveHeartbeatSettings() {
+            const interval = document.getElementById('heartbeat-interval').value;
+            const fileLocation = document.getElementById('heartbeat-file-location').value;
+            const statusEl = document.getElementById('heartbeat-status');
+
+            statusEl.textContent = 'Saving...';
+
+            try {
+                const formData = new FormData();
+                formData.append('interval', interval);
+                formData.append('file_location', fileLocation);
+
+                const res = await fetch('/api/settings/heartbeat', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    statusEl.textContent = '✅ Saved!';
+                    setTimeout(() => statusEl.textContent = '', 2500);
+                } else {
+                    statusEl.textContent = '❌ ' + (data.error || 'Failed');
+                }
+            } catch (err) {
+                statusEl.textContent = '❌ Network error';
+            }
+        }
+
+        async function testHeartbeat() {
+            const statusEl = document.getElementById('heartbeat-status');
+            statusEl.textContent = 'Sending...';
+
+            try {
+                const res = await fetch('/api/heartbeat/test', { method: 'POST' });
+                const data = await res.json();
+
+                if (data.success) {
+                    statusEl.textContent = '✅ Heartbeat sent!';
+                } else {
+                    statusEl.textContent = '❌ ' + (data.error || 'Failed');
+                }
+
+                setTimeout(() => {
+                    if (statusEl.textContent.includes('✅') || statusEl.textContent.includes('❌')) {
+                        statusEl.textContent = '';
+                    }
+                }, 4000);
+            } catch (err) {
+                statusEl.textContent = '❌ Network error';
+            }
+        }
     </script>
 </body>
 </html>

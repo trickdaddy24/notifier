@@ -114,6 +114,14 @@ def init_db(backfill_legacy: bool = True) -> None:
             )
         ''')
 
+        # Simple key-value settings table for web UI configuration
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS settings (
+                key   TEXT PRIMARY KEY,
+                value TEXT
+            )
+        ''')
+
         # Indexes
         c.execute("CREATE INDEX IF NOT EXISTS idx_notifications_due ON notifications(sent, due_ts)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_logs_time ON logs(timestamp)")
@@ -144,4 +152,24 @@ def init_db(backfill_legacy: bool = True) -> None:
                     # If helpers are not available or parsing fails, skip silently
                     pass
 
+        conn.commit()
+
+
+def get_setting(key: str, default: str = None) -> str:
+    """Get a setting value from the database."""
+    with get_db() as conn:
+        c = conn.cursor()
+        c.execute("SELECT value FROM settings WHERE key = ?", (key,))
+        row = c.fetchone()
+        return row["value"] if row else default
+
+
+def set_setting(key: str, value: str) -> None:
+    """Save or update a setting in the database."""
+    with get_db() as conn:
+        c = conn.cursor()
+        c.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+            (key, value)
+        )
         conn.commit()

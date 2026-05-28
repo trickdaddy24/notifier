@@ -51,12 +51,12 @@ TEMPLATES_DIR = BASE_DIR / "templates"
 # Use the shared database module from the main notifier package.
 # This ensures the web UI and CLI use exactly the same schema and logic.
 try:
-    from notifier.db import get_db, init_db, DB_PATH
+    from notifier.db import get_db, init_db, DB_PATH, get_setting, set_setting
 except ImportError:
     # Fallback for when running web/ in isolation (development)
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    from notifier.db import get_db, init_db, DB_PATH
+    from notifier.db import get_db, init_db, DB_PATH, get_setting, set_setting
 
 
 def get_upcoming_reminders(limit: int = 50):
@@ -117,8 +117,13 @@ async def lifespan(app: FastAPI):
     # 1. Reminder delivery (every minute)
     scheduler.add_job(send_notifications, "interval", minutes=1, id="send_notifications")
 
-    # 2. Heartbeat (configurable via HEARTBEAT_INTERVAL in hours, default 6h)
-    heartbeat_interval = int(os.getenv("HEARTBEAT_INTERVAL", "6"))
+    # 2. Heartbeat (configurable via DB or HEARTBEAT_INTERVAL env, default 6h)
+    heartbeat_interval_str = get_setting("heartbeat_interval") or os.getenv("HEARTBEAT_INTERVAL", "6")
+    try:
+        heartbeat_interval = int(heartbeat_interval_str)
+    except ValueError:
+        heartbeat_interval = 6
+
     if heartbeat_interval > 0:
         scheduler.add_job(
             send_heartbeat,
@@ -128,7 +133,7 @@ async def lifespan(app: FastAPI):
         )
         print(f"[notifier-web] Heartbeat scheduled every {heartbeat_interval} hours")
     else:
-        print("[notifier-web] Heartbeat disabled (HEARTBEAT_INTERVAL=0)")
+        print("[notifier-web] Heartbeat disabled")
 
     scheduler.start()
     print("[notifier-web] APScheduler started — notifications will be sent every minute.")
@@ -460,3 +465,70 @@ async def get_logs(limit: int = 30, user: Optional[str] = Depends(get_current_us
         return {"logs": logs}
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ── Heartbeat Settings API ───────────────────────────────────────────────────
+
+@app.get("/api/settings/heartbeat")
+async def get_heartbeat_settings(user: Optional[str] = Depends(get_current_user)):
+    if user is None:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    interval = get_setting("heartbeat_interval") or os.getenv("HEARTBEAT_INTERVAL", "6")
+    file_location = get_setting("heartbeat_file_location") or os.getenv("HEARTBEAT_FILE_LOCATION", "/app (Docker)")
+
+    return {
+        "interval": int(interval) if interval.isdigit() else 6,
+        "file_location": file_location
+    }
+
+
+@app.post("/api/settings/heartbeat")
+async def update_heartbeat_settings(
+    interval: int = Form(...),
+    file_location: str = Form(""),
+    user: Optional[str] = Depends(get_current_user)
+):
+    if user is None:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    if interval < 0:
+        return JSONResponse({"error": "Interval must be 0 or greater"}, status_code=400)
+
+    set_setting("heartbeat_interval", str(interval))
+    if file_location:
+        set_setting("heartbeat_file_location", file_location)
+
+    # Update running scheduler
+    global scheduler
+    if scheduler:
+        try:
+            scheduler.remove_job("heartbeat")
+        except Exception:
+            pass  # job didn't exist
+
+        if interval > 0:
+            scheduler.add_job(
+                send_heartbeat,
+                "interval",
+                hours=interval,
+                id="heartbeat"
+            )
+
+    logger.info(f"User '{user}' updated heartbeat interval to {interval}h")
+    return {"success": True, "message": f"Heartbeat interval set to {interval} hours"}
+
+
+@app.post("/api/heartbeat/test")
+async def test_heartbeat(user: Optional[str] = Depends(get_current_user)):
+    """Manually trigger a heartbeat message to Telegram."""
+    if user is None:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    try:
+        send_heartbeat()
+        logger.info(f"User '{user}' manually triggered heartbeat test")
+        return {"success": True, "message": "Heartbeat test message sent to Telegram!"}
+    except Exception as e:
+        logger.exception("Heartbeat test failed")
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
