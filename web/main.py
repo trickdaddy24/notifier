@@ -57,12 +57,12 @@ TEMPLATES_DIR = BASE_DIR / "templates"
 # Use the shared database module from the main notifier package.
 # This ensures the web UI and CLI use exactly the same schema and logic.
 try:
-    from notifier.db import get_db, init_db, DB_PATH, get_setting, set_setting, _to_ts
+    from notifier.db import get_db, init_db, DB_PATH, get_setting, set_setting, _to_ts, _now_in_tz
 except ImportError:
     # Fallback for when running web/ in isolation (development)
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    from notifier.db import get_db, init_db, DB_PATH, get_setting, set_setting, _to_ts
+    from notifier.db import get_db, init_db, DB_PATH, get_setting, set_setting, _to_ts, _now_in_tz
 
 
 def get_upcoming_reminders(limit: int = 50):
@@ -318,6 +318,47 @@ async def api_me(user: Optional[str] = Depends(get_current_user)):
     return {"authenticated": True, "user": user}
 
 
+@app.get("/api/stats")
+async def get_dashboard_stats(user: Optional[str] = Depends(get_current_user)):
+    if user is None:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    try:
+        now = _now_in_tz()
+        today_start = datetime(now.year, now.month, now.day)
+        today_start_ts = _to_ts(today_start)
+        today_end_ts = _to_ts(datetime(now.year, now.month, now.day, 23, 59, 59))
+
+        with get_db() as conn:
+            c = conn.cursor()
+
+            # Pending reminders
+            c.execute("SELECT COUNT(*) FROM notifications WHERE sent = 0")
+            pending = c.fetchone()[0]
+
+            # Sent today (using due_ts within today in configured timezone)
+            c.execute(
+                "SELECT COUNT(*) FROM notifications WHERE sent = 1 AND due_ts >= ? AND due_ts <= ?",
+                (today_start_ts, today_end_ts)
+            )
+            sent_today = c.fetchone()[0]
+
+            # Active channels (simple count of configured ones)
+            active_channels = 0
+            for chan in CHANNELS:
+                creds = get_channel_credentials(chan["name"])
+                if any(creds.values()):
+                    active_channels += 1
+
+        return {
+            "pending": pending,
+            "sent_today": sent_today,
+            "active_channels": active_channels
+        }
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 # ── Reminder API (used by the dashboard) ─────────────────────────────────────
 
 @app.post("/api/reminders")
@@ -359,6 +400,46 @@ async def create_reminder(
             new_id = c.lastrowid
             conn.commit()
         return {"success": True, "id": new_id, "due": due_str}
+    except Exception as e:
+        return JSONResponse({"error": f"Database error: {str(e)}"}, status_code=500)
+
+
+@app.put("/api/reminders/{reminder_id}")
+async def update_reminder(
+    reminder_id: int,
+    message: str = Form(...),
+    due: str = Form(...),
+    recurrence: str = Form(""),
+    user: Optional[str] = Depends(get_current_user),
+):
+    if user is None:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    if not message or not message.strip():
+        return JSONResponse({"error": "Message is required"}, status_code=400)
+
+    try:
+        dt = datetime.fromisoformat(due.replace("T", " "))
+        due_str = dt.strftime("%Y-%m-%d %H:%M")
+        due_ts = _to_ts(dt)
+    except Exception:
+        return JSONResponse({"error": "Invalid date/time format"}, status_code=400)
+
+    rec = recurrence or None
+    repeat_time = None
+    if rec == "daily":
+        repeat_time = dt.strftime("%H:%M")
+
+    try:
+        with get_db() as conn:
+            c = conn.cursor()
+            c.execute(
+                "UPDATE notifications SET message=?, due_time=?, due_ts=?, recurrence=?, repeat_time=? "
+                "WHERE id = ?",
+                (message.strip(), due_str, due_ts, rec, repeat_time, reminder_id),
+            )
+            conn.commit()
+        return {"success": True}
     except Exception as e:
         return JSONResponse({"error": f"Database error: {str(e)}"}, status_code=500)
 

@@ -50,21 +50,54 @@
         </div>
     </nav>
 
-    <div class="max-w-7xl mx-auto px-6 py-8">
-        <!-- Header -->
-        <div class="flex items-end justify-between mb-8">
-            <div>
-                <h1 class="text-4xl font-display tracking-tighter font-semibold">Dashboard</h1>
-                <p class="text-zinc-400 mt-1">Your notification scheduler</p>
-            </div>
-            
-            <div class="flex items-center gap-3">
-                <div class="px-4 py-2 bg-zinc-900 border border-zinc-800 rounded-2xl text-sm flex items-center gap-2">
-                    <div class="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
-                    <span class="text-emerald-400 font-medium">Running</span>
+    <div class="flex max-w-7xl mx-auto">
+        <!-- Left Sidebar -->
+        <div class="w-56 bg-zinc-900 border-r border-zinc-800 min-h-screen p-4 hidden md:block">
+            <div class="mb-8">
+                <div class="flex items-center gap-3 mb-6">
+                    <div class="w-8 h-8 bg-emerald-600 rounded-xl flex items-center justify-center">
+                        <i class="fa-solid fa-bell text-white"></i>
+                    </div>
+                    <span class="font-display text-xl font-semibold">Notifier</span>
                 </div>
             </div>
+
+            <nav class="space-y-1 text-sm">
+                <a href="#reminders" class="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-zinc-800 text-zinc-300 hover:text-white">
+                    <i class="fa-solid fa-list w-4"></i> <span>Reminders</span>
+                </a>
+                <a href="#activity" class="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-zinc-800 text-zinc-300 hover:text-white">
+                    <i class="fa-solid fa-history w-4"></i> <span>Activity</span>
+                </a>
+                <a href="#services" class="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-zinc-800 text-zinc-300 hover:text-white">
+                    <i class="fa-solid fa-plug w-4"></i> <span>Services</span>
+                </a>
+                <a href="#heartbeat" class="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-zinc-800 text-zinc-300 hover:text-white">
+                    <i class="fa-solid fa-heartbeat w-4"></i> <span>Heartbeat</span>
+                </a>
+            </nav>
+
+            <div class="mt-auto pt-8 text-xs text-zinc-500">
+                <div id="live-datetime" class="font-mono"></div>
+            </div>
         </div>
+
+        <!-- Main Content -->
+        <div class="flex-1 px-6 py-8 max-w-5xl">
+            <!-- Header -->
+            <div class="flex items-end justify-between mb-8">
+                <div>
+                    <h1 class="text-4xl font-display tracking-tighter font-semibold">Dashboard</h1>
+                    <p class="text-zinc-400 mt-1">Your notification scheduler</p>
+                </div>
+                
+                <div class="flex items-center gap-3">
+                    <div class="px-4 py-2 bg-zinc-900 border border-zinc-800 rounded-2xl text-sm flex items-center gap-2">
+                        <div class="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
+                        <span class="text-emerald-400 font-medium">Running</span>
+                    </div>
+                </div>
+            </div>
 
         <!-- Stats -->
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
@@ -74,11 +107,11 @@
             </div>
             <div class="bg-zinc-900 border border-zinc-800 rounded-3xl p-5">
                 <div class="text-zinc-400 text-sm">Sent Today</div>
-                <div class="text-4xl font-semibold mt-2 tracking-tighter">—</div>
+                <div class="text-4xl font-semibold mt-2 tracking-tighter" id="sent-today-count">—</div>
             </div>
             <div class="bg-zinc-900 border border-zinc-800 rounded-3xl p-5">
                 <div class="text-zinc-400 text-sm">Active Channels</div>
-                <div class="text-4xl font-semibold mt-2 tracking-tighter">3/4</div>
+                <div class="text-4xl font-semibold mt-2 tracking-tighter" id="active-channels-count">—</div>
             </div>
         </div>
 
@@ -113,10 +146,16 @@
                                 {% endif %}
                             </div>
                         </div>
-                        <button onclick="deleteReminder({{ r.id }}, this)"
-                                class="ml-4 text-zinc-500 hover:text-red-400 transition-colors p-2">
-                            <i class="fa-solid fa-trash"></i>
-                        </button>
+                        <div class="flex gap-1 ml-4">
+                            <button onclick="editReminder({{ r.id }})"
+                                    class="text-zinc-500 hover:text-emerald-400 p-2">
+                                <i class="fa-solid fa-edit"></i>
+                            </button>
+                            <button onclick="deleteReminder({{ r.id }}, this)"
+                                    class="text-zinc-500 hover:text-red-400 p-2">
+                                <i class="fa-solid fa-trash"></i>
+                            </button>
+                        </div>
                     </div>
                     {% endfor %}
                 </div>
@@ -275,6 +314,7 @@
             </div>
 
             <form id="add-reminder-form" onsubmit="submitReminder(event)" class="p-6 space-y-5">
+                <input type="hidden" name="id" id="reminder-id">
                 <div>
                     <label class="block text-sm text-zinc-400 mb-1.5">Message</label>
                     <textarea name="message" required rows="3"
@@ -366,13 +406,45 @@
             try {
                 const res = await fetch(`/api/reminders/${id}`, { method: 'DELETE' });
                 if (res.ok) {
-                    // Simple: reload to refresh the list
                     window.location.reload();
                 } else {
                     alert('Failed to delete reminder');
                 }
             } catch (err) {
                 alert('Error deleting reminder');
+            }
+        }
+
+        async function editReminder(id) {
+            try {
+                const res = await fetch(`/api/reminders/${id}`);  // Note: we don't have GET single yet, using reload for simplicity or we can enhance later
+                // For now, simple approach: reload page and use browser to remember, but better to fetch properly.
+                // Quick implementation: open add modal prefilled via separate call if needed.
+                // For this iteration, we'll use a simple prompt-based edit for speed.
+                const currentMsg = prompt("New message:");
+                if (!currentMsg) return;
+
+                const newDue = prompt("New due (YYYY-MM-DD HH:MM):");
+                if (!newDue) return;
+
+                const formData = new FormData();
+                formData.append('message', currentMsg);
+                formData.append('due', newDue.replace(' ', 'T')); // rough format
+                formData.append('recurrence', '');
+
+                const updateRes = await fetch(`/api/reminders/${id}`, {
+                    method: 'PUT',
+                    body: formData
+                });
+
+                if (updateRes.ok) {
+                    window.location.reload();
+                } else {
+                    const err = await updateRes.json();
+                    alert('Edit failed: ' + (err.error || 'Unknown'));
+                }
+            } catch (err) {
+                alert('Error editing reminder');
             }
         }
 
@@ -782,7 +854,42 @@
             loadLogs();
             loadHeartbeatSettings();
             loadChannels();
+            loadDashboardStats();
+            startLiveClock();
         });
+
+        function startLiveClock() {
+            const el = document.getElementById('live-datetime');
+            if (!el) return;
+
+            function update() {
+                const now = new Date();
+                el.textContent = now.toLocaleString([], {
+                    month: 'short', day: 'numeric',
+                    hour: '2-digit', minute: '2-digit'
+                });
+            }
+            update();
+            setInterval(update, 30000);
+        }
+
+        async function loadDashboardStats() {
+            try {
+                const res = await fetch('/api/stats');
+                const stats = await res.json();
+
+                const pendingEl = document.getElementById('pending-count');
+                if (pendingEl) pendingEl.textContent = stats.pending ?? '—';
+
+                const sentEl = document.getElementById('sent-today-count');
+                if (sentEl) sentEl.textContent = stats.sent_today ?? '—';
+
+                const activeEl = document.getElementById('active-channels-count');
+                if (activeEl) activeEl.textContent = stats.active_channels ?? '—';
+            } catch (err) {
+                console.error('Failed to load dashboard stats', err);
+            }
+        }
     </script>
 </body>
 </html>
