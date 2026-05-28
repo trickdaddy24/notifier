@@ -122,4 +122,25 @@ This feature is tracked in the [ROADMAP.md](https://github.com/trickdaddy24/noti
 
 **Suggested Labels**: `enhancement`, `auth`, `roadmap`, `phase-3`, `high-priority`, `next.js`, `security`, `admin-panel`
 
+**Suggested Milestone**: `Phase 3: Authentication & Admin System`
+
+### Recommended Steps Before Creating This Issue
+
+1. Create the milestone first (if it doesn't exist):
+   ```bash
+   gh milestone create "Phase 3: Authentication & Admin System" \
+     --description "Full production-grade auth system with Email/Password, Google OAuth, approval workflows, security hardening, and admin panel." \
+     --due-date 2026-12-31
+   ```
+
+2. Then create the issue with the milestone:
+   ```bash
+   gh issue create \
+     --repo trickdaddy24/notifier \
+     --title "[Phase 3] Full Authentication, Approval & Admin System (Next.js + Auth.js)" \
+     --body-file GITHUB_ISSUE_authentication_admin_system.md \
+     --label enhancement,auth,roadmap,phase-3,high-priority,next.js,security,admin-panel \
+     --milestone "Phase 3: Authentication & Admin System"
+   ```
+
 Please discuss architecture (Next.js frontend vs full rewrite) before starting implementation.

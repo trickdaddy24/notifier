@@ -3,6 +3,7 @@ name: Phase 3 - Full Authentication & Admin System
 about: Request to implement a production-grade authentication, approval, and admin system (Next.js + Auth.js direction)
 title: '[Phase 3] Full Authentication, Approval & Admin System'
 labels: enhancement, auth, roadmap, phase-3, high-priority, next.js, security, admin-panel
+milestone: Phase 3: Authentication & Admin System
 assignees: ''
 ---
 
@@ -106,5 +107,7 @@ This feature is tracked in the [ROADMAP.md](../ROADMAP.md) under **Phase 3**.
 **Priority**: High (Phase 3)
 
 **Suggested Labels**: `enhancement`, `auth`, `roadmap`, `phase-3`, `next.js`
+
+**Suggested Milestone**: `Phase 3: Authentication & Admin System`
 
 Please discuss architecture (Next.js frontend vs full rewrite) before starting implementation.
