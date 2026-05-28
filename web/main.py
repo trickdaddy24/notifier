@@ -38,11 +38,11 @@ from .auth import (
 
 # Import shared notification delivery
 try:
-    from notifier.notifications import send_notifications, set_quiet_mode
+    from notifier.notifications import send_notifications, send_heartbeat, set_quiet_mode
 except ImportError:
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    from notifier.notifications import send_notifications, set_quiet_mode
+    from notifier.notifications import send_notifications, send_heartbeat, set_quiet_mode
 
 
 BASE_DIR = Path(__file__).parent
@@ -113,7 +113,23 @@ async def lifespan(app: FastAPI):
     # Start APScheduler (much better than the old 'schedule' library for web apps)
     set_quiet_mode(True)
     scheduler = BackgroundScheduler()
+
+    # 1. Reminder delivery (every minute)
     scheduler.add_job(send_notifications, "interval", minutes=1, id="send_notifications")
+
+    # 2. Heartbeat (configurable via HEARTBEAT_INTERVAL in hours, default 6h)
+    heartbeat_interval = int(os.getenv("HEARTBEAT_INTERVAL", "6"))
+    if heartbeat_interval > 0:
+        scheduler.add_job(
+            send_heartbeat,
+            "interval",
+            hours=heartbeat_interval,
+            id="heartbeat"
+        )
+        print(f"[notifier-web] Heartbeat scheduled every {heartbeat_interval} hours")
+    else:
+        print("[notifier-web] Heartbeat disabled (HEARTBEAT_INTERVAL=0)")
+
     scheduler.start()
     print("[notifier-web] APScheduler started — notifications will be sent every minute.")
 

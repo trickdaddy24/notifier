@@ -246,3 +246,64 @@ def send_notifications(verbose: bool = False, only_id: int | None = None) -> Non
 
             # TODO: Add recurrence handling here (copy from original notifier.py when needed)
             conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# Heartbeat
+# ---------------------------------------------------------------------------
+
+def get_local_ip():
+    """Get local IP address (works inside Docker too)."""
+    import socket
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "unknown"
+
+def get_external_ip():
+    """Get public/external IP."""
+    try:
+        r = requests.get("https://api.ipify.org", timeout=5)
+        if r.status_code == 200:
+            return r.text.strip()
+    except Exception:
+        pass
+    return "unknown"
+
+def send_heartbeat():
+    """Send a system heartbeat to Telegram (if configured)."""
+    bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
+    chat_id = os.getenv('TELEGRAM_CHAT_ID')
+
+    if not bot_token or not chat_id:
+        logger.debug("Heartbeat skipped — Telegram not configured")
+        return
+
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    local_ip = get_local_ip()
+    external_ip = get_external_ip()
+
+    # In Docker this will show the container path
+    file_location = os.getenv("HEARTBEAT_FILE_LOCATION", "/app (running in Docker)")
+
+    message = (
+        f"❤️ Notifier Heartbeat\n\n"
+        f"📅 Timestamp: {timestamp}\n"
+        f"🌐 Local IP: {local_ip}\n"
+        f"🌐 External IP: {external_ip}\n"
+        f"📁 File Location: {file_location}"
+    )
+
+    try:
+        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        r = requests.post(url, json={"chat_id": chat_id, "text": message}, timeout=10)
+        if r.status_code == 200:
+            logger.info("Heartbeat sent successfully to Telegram")
+        else:
+            logger.warning(f"Heartbeat failed to send: HTTP {r.status_code}")
+    except Exception as e:
+        logger.error(f"Failed to send heartbeat: {e}")

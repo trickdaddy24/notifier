@@ -14,6 +14,11 @@ services:
       - NOTIFIER_DB_PATH=/app/data/notifications.db
       # Set to "1" to auto-seed demo reminders on first run (dev only)
       # - SEED_SAMPLE_DATA=1
+
+      # Heartbeat settings (sent to Telegram)
+      # HEARTBEAT_INTERVAL=6          # Send every N hours (0 = disabled)
+      # HEARTBEAT_FILE_LOCATION=/app   # Custom string shown in heartbeat message
+
     volumes:
       - ./data:/app/data
       - ./.env:/app/.env:ro
