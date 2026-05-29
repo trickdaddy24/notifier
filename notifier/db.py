@@ -227,3 +227,44 @@ def _from_ts(ts: int) -> datetime:
     if tz is None:
         return datetime.fromtimestamp(ts)
     return datetime.fromtimestamp(ts, tz).replace(tzinfo=None)
+
+
+# ---------------------------------------------------------------------------
+# Time sync mode (NTP/Server vs Local PC / Browser)
+# ---------------------------------------------------------------------------
+
+def get_time_mode() -> str:
+    """Return the current time interpretation mode: 'server' (NTP) or 'local' (browser/PC)."""
+    val = get_setting("time_mode", "server")
+    return val if val in ("server", "local") else "server"
+
+
+def set_time_mode(mode: str) -> None:
+    """Persist the time mode. Accepts 'server' or 'local'."""
+    if mode not in ("server", "local"):
+        mode = "server"
+    set_setting("time_mode", mode)
+
+
+def to_epoch(dt: datetime, browser_tz: str | None = None) -> int:
+    """Convert a naive wall-clock datetime to epoch seconds.
+
+    Behavior depends on the persisted time_mode setting:
+    - 'server' (default, NTP): use the configured TIMEZONE env (same as _to_ts)
+    - 'local': if browser_tz (IANA name) is provided, interpret dt in that zone.
+               Falls back to server mode if browser_tz is missing or invalid.
+
+    This is the single function web UI reminder creation should use.
+    """
+    mode = get_time_mode()
+
+    if mode == "local" and browser_tz:
+        try:
+            tz = ZoneInfo(browser_tz)
+            return int(dt.replace(tzinfo=tz).timestamp())
+        except (ZoneInfoNotFoundError, KeyError, Exception):
+            # Bad tz name → fall back to server time so we never lose the reminder
+            pass
+
+    # Server / NTP mode (or fallback)
+    return _to_ts(dt)

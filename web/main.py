@@ -57,12 +57,37 @@ TEMPLATES_DIR = BASE_DIR / "templates"
 # Use the shared database module from the main notifier package.
 # This ensures the web UI and CLI use exactly the same schema and logic.
 try:
-    from notifier.db import get_db, init_db, DB_PATH, get_setting, set_setting, _to_ts, _now_in_tz
+    from notifier.db import (
+    get_db, init_db, DB_PATH, get_setting, set_setting,
+    _to_ts, _now_in_tz, _tz_label, get_time_mode, set_time_mode, to_epoch
+)
 except ImportError:
     # Fallback for when running web/ in isolation (development)
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    from notifier.db import get_db, init_db, DB_PATH, get_setting, set_setting, _to_ts, _now_in_tz
+    from notifier.db import (
+    get_db, init_db, DB_PATH, get_setting, set_setting,
+    _to_ts, _now_in_tz, _tz_label, get_time_mode, set_time_mode, to_epoch
+)
+
+
+def get_app_version() -> str:
+    """Return the current application version from version_notes.db.
+    Falls back gracefully if the version manager can't be imported.
+    """
+    try:
+        # Normal import when the package structure is available
+        from notifier.version_manager import get_current_version
+        return get_current_version()
+    except Exception:
+        try:
+            # Fallback when running the web app in isolation (dev)
+            import sys
+            sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+            from notifier.version_manager import get_current_version
+            return get_current_version()
+        except Exception:
+            return "2.2.0"  # last known good fallback
 
 
 def get_upcoming_reminders(limit: int = 50):
@@ -222,6 +247,7 @@ async def root(
         return login_redirect(request, next_url="/")
 
     reminders = get_upcoming_reminders()
+    version = get_app_version()
 
     html = render_template(
         "dashboard.html",
@@ -230,6 +256,7 @@ async def root(
             "auth_enabled": is_auth_enabled(),
             "reminders": reminders,
             "reminder_count": len(reminders),
+            "version": version,
         },
     )
     return HTMLResponse(html)
@@ -366,6 +393,7 @@ async def create_reminder(
     message: str = Form(...),
     due: str = Form(...),
     recurrence: str = Form(""),
+    browser_tz: str = Form(""),
     user: Optional[str] = Depends(get_current_user),
 ):
     if user is None:
@@ -379,8 +407,9 @@ async def create_reminder(
         dt = datetime.fromisoformat(due.replace("T", " "))
         due_str = dt.strftime("%Y-%m-%d %H:%M")
 
-        # Use the shared timezone-aware converter (respects TIMEZONE env var)
-        due_ts = _to_ts(dt)
+        # Respect the user's chosen time sync mode (NTP/server vs Local PC)
+        # browser_tz comes from Intl.DateTimeFormat().resolvedOptions().timeZone in the browser
+        due_ts = to_epoch(dt, browser_tz or None)
     except Exception:
         return JSONResponse({"error": "Invalid date/time format"}, status_code=400)
 
@@ -410,6 +439,7 @@ async def update_reminder(
     message: str = Form(...),
     due: str = Form(...),
     recurrence: str = Form(""),
+    browser_tz: str = Form(""),
     user: Optional[str] = Depends(get_current_user),
 ):
     if user is None:
@@ -421,7 +451,8 @@ async def update_reminder(
     try:
         dt = datetime.fromisoformat(due.replace("T", " "))
         due_str = dt.strftime("%Y-%m-%d %H:%M")
-        due_ts = _to_ts(dt)
+        # Same time mode logic as creation
+        due_ts = to_epoch(dt, browser_tz or None)
     except Exception:
         return JSONResponse({"error": "Invalid date/time format"}, status_code=400)
 
@@ -639,6 +670,69 @@ async def update_heartbeat_settings(
 
     logger.info(f"User '{user}' updated heartbeat interval to {interval}h")
     return {"success": True, "message": f"Heartbeat interval set to {interval} hours"}
+
+
+# ── Time Sync Settings (NTP/Server vs Local PC) ──────────────────────────────
+
+@app.get("/api/settings/time")
+async def get_time_settings(user: Optional[str] = Depends(get_current_user)):
+    if user is None:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    mode = get_time_mode()
+    tz_label = _tz_label()
+
+    return {
+        "mode": mode,
+        "server_timezone": tz_label,
+        "description": "server" if mode == "server" else "local browser/PC"
+    }
+
+
+@app.post("/api/settings/time")
+async def update_time_settings(
+    mode: str = Form(...),
+    user: Optional[str] = Depends(get_current_user)
+):
+    if user is None:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    if mode not in ("server", "local"):
+        return JSONResponse({"error": "mode must be 'server' or 'local'"}, status_code=400)
+
+    set_time_mode(mode)
+    logger.info(f"User '{user}' set time sync mode to '{mode}'")
+    return {
+        "success": True,
+        "mode": mode,
+        "message": "Server (NTP) time" if mode == "server" else "Local PC / browser time"
+    }
+
+
+@app.get("/api/server-time")
+async def get_server_time(user: Optional[str] = Depends(get_current_user)):
+    """Return current server time (for the Time Sync comparison UI)."""
+    if user is None:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    now_utc = datetime.utcnow()
+    now_server = _now_in_tz()
+    tz_label = _tz_label()
+
+    return {
+        "utc": now_utc.strftime("%Y-%m-%d %H:%M:%S"),
+        "server_local": now_server.strftime("%Y-%m-%d %H:%M:%S"),
+        "timezone": tz_label,
+        "epoch": int(now_utc.timestamp())
+    }
+
+
+@app.get("/api/version")
+async def api_version(user: Optional[str] = Depends(get_current_user)):
+    """Return the current running version (useful for the dashboard header)."""
+    if user is None:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    return {"version": get_app_version()}
 
 
 @app.post("/api/heartbeat/test")

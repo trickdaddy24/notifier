@@ -463,6 +463,55 @@ def edit_notes():
             logging.info("Edit notes cancelled for version %s.", version)
 
 
+def bump_version(notes: str, bump_type: str = "patch") -> str | None:
+    """
+    Non-interactive version bump for scripts and AI assistants.
+
+    bump_type: 'major' | 'minor' | 'patch' (default)
+    Returns the new version string (e.g. '2.3.0') on success.
+    """
+    setup_database()
+
+    latest_data = get_latest_version_data()
+    if latest_data is None:
+        new_id = "001"
+        new_version = "0.0.1"
+    else:
+        latest_id, latest_version = latest_data
+        next_id_int = int(latest_id) + 1
+        new_id = f"{next_id_int:03d}"
+
+        major, minor, patch = parse_version(latest_version)
+
+        bump = (bump_type or "patch").lower().strip()
+        if bump == "major":
+            new_version = f"{major + 1}.0.0"
+        elif bump == "minor":
+            new_version = f"{major}.{minor + 1}.0"
+        else:
+            new_version = f"{major}.{minor}.{patch + 1}"
+
+    timestamp = datetime.now().isoformat(sep=" ", timespec="seconds")
+
+    with get_db() as conn:
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                "INSERT INTO releases (id, version_number, notes, timestamp) "
+                "VALUES (?, ?, ?, ?)",
+                (new_id, new_version, notes.strip(), timestamp),
+            )
+            conn.commit()
+            update_changelog()
+            print(f"[SUCCESS] Bumped to version {new_version} (ID {new_id})")
+            logging.info("Auto-bumped version to %s", new_version)
+            return new_version
+        except sqlite3.IntegrityError as e:
+            print(f"[ERROR] Version bump failed (duplicate?): {e}")
+            logging.error("Version bump failed: %s", e)
+            return None
+
+
 # ---------------------------------------------------------------------------
 # Standalone entry point
 # ---------------------------------------------------------------------------

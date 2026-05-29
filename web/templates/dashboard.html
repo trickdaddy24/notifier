@@ -15,46 +15,66 @@
     <!-- Top Navigation -->
     <nav class="border-b border-zinc-800 bg-zinc-900/70 backdrop-blur-lg sticky top-0 z-50">
         <div class="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
-            <div class="flex items-center gap-3 cursor-pointer" onclick="showView('main')">
+            <div class="flex items-center gap-3 cursor-pointer" onclick="showView('main')" title="Return to Home / Dashboard">
                 <div class="w-9 h-9 bg-emerald-600 rounded-2xl flex items-center justify-center">
                     <i class="fa-solid fa-bell text-white"></i>
                 </div>
-                <div>
+                <div class="flex items-center gap-2">
                     <span class="font-display text-xl font-semibold tracking-tight">Notifier</span>
+                    <!-- Current Version Badge (always visible in top nav) -->
+                    <span id="app-version-badge"
+                          class="text-[10px] font-mono px-2 py-0.5 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-400">
+                        {% if version %}v{{ version }}{% else %}v2.2.0{% endif %}
+                    </span>
                 </div>
             </div>
 
-            <div class="flex items-center gap-6">
-                <!-- Live Date & Time in Top Nav (always visible with accent color) -->
+            <!-- TEMPORARY DEBUG MARKER - REMOVE AFTER YOU SEE IT -->
+            <div class="bg-red-600 text-white text-center text-xs py-1 font-bold tracking-wider">
+                NEW BUILD 28 MAY 2026 — Time Sync + Version Badge + Top Nav Button Added
+            </div>
+
+            <div class="flex items-center gap-4">
+                <!-- Live Date & Time - ALWAYS VISIBLE with strong page colors -->
                 <div id="top-nav-datetime" 
-                     class="hidden md:flex items-center gap-2 font-mono text-sm px-4 py-1.5 bg-zinc-800 border border-zinc-700 rounded-2xl text-emerald-400 shadow-inner">
-                    <i class="fa-regular fa-clock text-emerald-500"></i>
-                    <span id="top-nav-datetime-text"></span>
+                     class="flex items-center gap-2 font-mono text-sm px-4 py-1.5 bg-emerald-950 border-2 border-emerald-600/80 rounded-2xl text-emerald-200 shadow-inner">
+                    <i class="fa-regular fa-clock text-emerald-400"></i>
+                    <span id="top-nav-datetime-text" class="font-bold tracking-tighter"></span>
                 </div>
 
-                <div class="flex items-center gap-4">
-                    <div class="flex items-center gap-2 text-sm text-zinc-400">
-                        <i class="fa-solid fa-user-circle"></i>
-                        <span>{{ user }}</span>
-                    </div>
+                <!-- Colorful Action Buttons in Top Nav -->
+                <button onclick="showAddModal()"
+                        class="flex items-center gap-2 px-4 py-1.5 text-sm font-semibold rounded-2xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 transition-all text-white shadow-sm">
+                    <i class="fa-solid fa-plus"></i>
+                    <span class="hidden sm:inline">Add Reminder</span>
+                </button>
 
-                    <!-- Test Telegram Button -->
-                    <button onclick="testTelegram()"
-                            class="text-sm flex items-center gap-2 px-3 py-1.5 rounded-2xl bg-blue-600 hover:bg-blue-500 transition-colors text-white">
-                        <i class="fa-brands fa-telegram"></i>
-                        <span class="hidden sm:inline">Test Telegram</span>
+                <button onclick="testTelegram()"
+                        class="flex items-center gap-2 px-3 py-1.5 text-sm rounded-2xl bg-sky-600 hover:bg-sky-500 active:bg-sky-700 transition-all text-white">
+                    <i class="fa-brands fa-telegram"></i>
+                    <span class="hidden md:inline">Test</span>
+                </button>
+
+                <!-- Quick access to Time Settings (visible even if sidebar is hidden) -->
+                <button onclick="showConfigView('time')"
+                        class="flex items-center gap-2 px-3 py-1.5 text-sm rounded-2xl bg-violet-600 hover:bg-violet-500 active:bg-violet-700 transition-all text-white"
+                        title="Time & Date Sync (NTP vs Local PC)">
+                    <i class="fa-solid fa-clock"></i>
+                    <span class="hidden md:inline">Time Sync</span>
+                </button>
+
+                <div class="flex items-center gap-2 text-sm text-zinc-400 pl-2 border-l border-zinc-800">
+                    <i class="fa-solid fa-user-circle"></i>
+                    <span class="hidden sm:inline">{{ user }}</span>
+                </div>
+
+                <form action="/logout" method="post">
+                    <button type="submit"
+                            class="flex items-center gap-2 px-3 py-1.5 text-sm rounded-2xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white transition-colors">
+                        <i class="fa-solid fa-sign-out-alt"></i>
+                        <span class="hidden md:inline">Sign out</span>
                     </button>
-                    
-                    <form action="/logout" method="post">
-                        <button 
-                            type="submit"
-                            class="text-sm flex items-center gap-2 px-3 py-1.5 rounded-2xl hover:bg-zinc-800 transition-colors text-zinc-400 hover:text-white"
-                        >
-                            <i class="fa-solid fa-sign-out-alt"></i>
-                            <span class="hidden sm:inline">Sign out</span>
-                        </button>
-                    </form>
-                </div>
+                </form>
             </div>
         </div>
     </nav>
@@ -63,11 +83,11 @@
         <!-- Left Sidebar - Navigation to config "pages" -->
         <div class="w-64 bg-zinc-900 border-r border-zinc-800 min-h-screen p-4 hidden lg:block">
             <div class="sticky top-4">
-                <!-- Home button at top of sidebar -->
+                <!-- Home button at top of sidebar - PRIMARY way to return to main screen -->
                 <button onclick="showView('main')"
-                        class="w-full mb-4 flex items-center gap-3 px-3 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-sm font-semibold transition-colors">
-                    <i class="fa-solid fa-home w-4"></i> 
-                    <span>Home / Dashboard</span>
+                        class="w-full mb-4 flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-sm font-bold transition-all shadow-sm">
+                    <i class="fa-solid fa-home"></i> 
+                    <span>HOME</span>
                 </button>
 
                 <h3 class="text-xs font-semibold uppercase tracking-widest text-zinc-500 mb-3 px-2">Configuration</h3>
@@ -83,6 +103,12 @@
                             class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-zinc-800 text-sm font-medium transition-colors">
                         <i class="fa-solid fa-heartbeat w-4"></i> 
                         <span>Heartbeat Settings</span>
+                    </button>
+
+                    <button onclick="showConfigView('time')"
+                            class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-zinc-800 text-sm font-medium transition-colors">
+                        <i class="fa-solid fa-clock w-4"></i> 
+                        <span>Time &amp; Date</span>
                     </button>
                 </nav>
             </div>
@@ -269,107 +295,97 @@
                 </div>
             </div>
 
-        <!-- Main Content Area -->
-        <div class="bg-zinc-900 border border-zinc-800 rounded-3xl p-8">
-            <div class="flex items-center justify-between mb-6">
-                <h2 class="text-xl font-semibold">Upcoming Reminders</h2>
-                <button onclick="showAddModal()"
-                        class="px-4 py-2 text-sm bg-emerald-600 hover:bg-emerald-500 rounded-2xl font-medium flex items-center gap-2 transition-colors">
-                    <i class="fa-solid fa-plus"></i>
-                    <span>Add Reminder</span>
-                </button>
-            </div>
+            <!-- Time & Date Sync View -->
+            <div id="view-time" class="hidden">
+                <h1 class="text-3xl font-semibold mb-2">Time &amp; Date Sync</h1>
+                <p class="text-zinc-400 mb-8">Choose how reminder times you enter are interpreted.</p>
 
-            <!-- Reminders List -->
-            <div id="reminders-list">
-                {% if reminders %}
-                <div class="space-y-3">
-                    {% for r in reminders %}
-                    <div class="flex items-start justify-between bg-zinc-950 border border-zinc-800 rounded-2xl px-5 py-4">
-                        <div class="flex-1 min-w-0">
-                            <div class="text-zinc-100 font-medium break-words">{{ r.message }}</div>
-                            <div class="mt-1 flex items-center gap-3 text-sm">
-                                <span class="text-emerald-400 font-mono">{{ r.due_time }}</span>
-                                {% if r.recurrence %}
-                                <span class="inline-flex items-center px-2 py-0.5 rounded-lg bg-zinc-900 text-xs text-zinc-400">
-                                    <i class="fa-solid fa-redo mr-1"></i> {{ r.recurrence }}
-                                </span>
-                                {% endif %}
-                                {% if r.is_overdue %}
-                                <span class="text-red-400 text-xs">Overdue</span>
-                                {% endif %}
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 max-w-5xl">
+                    <!-- Server / NTP Mode -->
+                    <div onclick="selectTimeMode('server')"
+                         class="time-mode-card cursor-pointer border-2 border-emerald-600 bg-zinc-900 rounded-3xl p-6 transition-all"
+                         id="mode-card-server">
+                        <div class="flex items-start gap-4">
+                            <div class="w-12 h-12 rounded-2xl bg-emerald-600/20 flex items-center justify-center flex-shrink-0">
+                                <i class="fa-solid fa-server text-emerald-400 text-2xl"></i>
+                            </div>
+                            <div class="flex-1">
+                                <div class="flex items-center gap-2">
+                                    <div class="font-semibold text-lg">NTP / Server Time</div>
+                                    <span class="text-[10px] px-2 py-0.5 rounded-full bg-emerald-600 text-white font-medium">RECOMMENDED</span>
+                                </div>
+                                <div class="text-sm text-emerald-300 mt-1">Uses your server's configured timezone</div>
+
+                                <div class="mt-4 text-sm space-y-1 text-zinc-300">
+                                    <div><span class="text-zinc-500">Server timezone:</span> <span id="server-tz-label" class="font-mono text-emerald-400"></span></div>
+                                    <div><span class="text-zinc-500">Server now:</span> <span id="server-time-now" class="font-mono"></span></div>
+                                </div>
+
+                                <div class="mt-4 text-xs text-zinc-400 leading-snug">
+                                    The server clock is kept accurate via NTP (standard on Linux servers).
+                                    All reminders fire based on this time.
+                                </div>
                             </div>
                         </div>
-                        <div class="flex gap-1 ml-4">
-                            <button onclick="editReminder({{ r.id }})"
-                                    class="text-zinc-500 hover:text-emerald-400 p-2">
-                                <i class="fa-solid fa-edit"></i>
-                            </button>
-                            <button onclick="deleteReminder({{ r.id }}, this)"
-                                    class="text-zinc-500 hover:text-red-400 p-2">
-                                <i class="fa-solid fa-trash"></i>
-                            </button>
+                    </div>
+
+                    <!-- Local PC / Browser Mode -->
+                    <div onclick="selectTimeMode('local')"
+                         class="time-mode-card cursor-pointer border-2 border-zinc-700 hover:border-sky-500 bg-zinc-900 rounded-3xl p-6 transition-all"
+                         id="mode-card-local">
+                        <div class="flex items-start gap-4">
+                            <div class="w-12 h-12 rounded-2xl bg-sky-600/20 flex items-center justify-center flex-shrink-0">
+                                <i class="fa-solid fa-laptop text-sky-400 text-2xl"></i>
+                            </div>
+                            <div class="flex-1">
+                                <div class="font-semibold text-lg">My Local PC</div>
+                                <div class="text-sm text-sky-300 mt-1">Use the date &amp; time from this browser</div>
+
+                                <div class="mt-4 text-sm space-y-1 text-zinc-300">
+                                    <div><span class="text-zinc-500">Your timezone:</span> <span id="browser-tz-label" class="font-mono text-sky-400"></span></div>
+                                    <div><span class="text-zinc-500">Your PC now:</span> <span id="browser-time-now" class="font-mono"></span></div>
+                                </div>
+
+                                <div class="mt-4 text-xs text-zinc-400 leading-snug">
+                                    When you pick a time in the reminder form, it will mean "that wall time on my computer".
+                                    Useful when your PC timezone differs from the server.
+                                </div>
+                            </div>
                         </div>
                     </div>
-                    {% endfor %}
                 </div>
-                {% else %}
-                <div class="text-center py-12 text-zinc-400 border border-dashed border-zinc-800 rounded-2xl">
-                    <i class="fa-solid fa-inbox text-3xl mb-3 block text-zinc-700"></i>
-                    <p class="font-medium">No reminders yet</p>
-                    <p class="text-sm mt-1">Click "Add Reminder" to create your first one.</p>
-                </div>
-                {% endif %}
-            </div>
-        </div>
 
-        <!-- Recent Activity / Logs -->
-        <div class="mt-8">
-            <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
-                <h2 class="text-xl font-semibold">Recent Activity</h2>
-                
-                <div class="flex flex-wrap gap-3 items-center">
-                    <!-- Filters -->
-                    <select id="log-filter-channel" onchange="loadLogs()" 
-                            class="bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-1.5 text-sm">
-                        <option value="">All Channels</option>
-                        <option value="telegram">Telegram</option>
-                        <option value="discord">Discord</option>
-                    </select>
+                <!-- Comparison + Save -->
+                <div class="mt-8 max-w-5xl">
+                    <div class="bg-zinc-900 border border-zinc-800 rounded-3xl p-6">
+                        <div class="flex flex-wrap items-center justify-between gap-4">
+                            <div>
+                                <div class="text-sm text-zinc-400">Current difference</div>
+                                <div id="time-diff" class="font-mono text-xl font-semibold text-amber-400">—</div>
+                            </div>
 
-                    <select id="log-filter-status" onchange="loadLogs()" 
-                            class="bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-1.5 text-sm">
-                        <option value="">All Statuses</option>
-                        <option value="SUCCESS">Success</option>
-                        <option value="FAILED">Failed</option>
-                        <option value="SKIPPED">Skipped</option>
-                    </select>
+                            <button onclick="saveTimeMode()"
+                                    class="px-8 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 font-semibold text-sm transition-colors flex items-center gap-2">
+                                <i class="fa-solid fa-save"></i>
+                                <span>Save Time Preference</span>
+                            </button>
+                        </div>
 
-                    <button onclick="loadLogs()" 
-                            class="px-4 py-1.5 text-sm bg-zinc-700 hover:bg-zinc-600 rounded-xl flex items-center gap-2 transition-colors">
-                        <i class="fa-solid fa-sync"></i>
-                        <span>Refresh</span>
-                    </button>
-
-                    <button onclick="clearAllLogs()" 
-                            class="px-4 py-1.5 text-sm bg-red-700 hover:bg-red-600 rounded-xl flex items-center gap-2 transition-colors">
-                        <i class="fa-solid fa-trash"></i>
-                        <span>Clear All</span>
-                    </button>
+                        <div class="mt-4 pt-4 border-t border-zinc-800 text-xs text-zinc-500">
+                            This setting only affects <strong>new reminders</strong> you create (and edits).
+                            Existing reminders keep the time they were originally saved with.
+                        </div>
+                    </div>
                 </div>
             </div>
 
-            <div id="logs-container" 
-                 class="bg-zinc-900 border border-zinc-800 rounded-3xl p-6 text-sm">
-                <div class="text-zinc-400">Loading recent activity...</div>
+            <!-- Footer note inside main column -->
+            <div class="mt-6 text-xs text-center text-zinc-500">
+                Auth is {% if auth_enabled %}enabled{% else %}disabled (dev mode){% endif %}. 
+                Logged in as <span class="font-mono">{{ user }}</span>.
+                <span class="mx-2 text-zinc-700">•</span>
+                v{% if version %}{{ version }}{% else %}2.2.0{% endif %}
             </div>
-        </div>
-
-        <!-- Main operational content stays here (clean) -->
-
-        <div class="mt-6 text-xs text-center text-zinc-500">
-            Auth is {% if auth_enabled %}enabled{% else %}disabled (dev mode){% endif %}. 
-            Logged in as <span class="font-mono">{{ user }}</span>.
         </div>
     </div>
 
@@ -486,6 +502,10 @@
             const form = e.target;
             const formData = new FormData(form);
 
+            // Always send the browser's IANA timezone so the backend can honor "Local PC" mode
+            const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+            if (browserTz) formData.append('browser_tz', browserTz);
+
             try {
                 const res = await fetch('/api/reminders', {
                     method: 'POST',
@@ -536,6 +556,9 @@
                 formData.append('message', currentMsg);
                 formData.append('due', newDue.replace(' ', 'T')); // rough format
                 formData.append('recurrence', '');
+                // Send browser tz so "Local PC" time mode works on edits too
+                const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+                if (browserTz) formData.append('browser_tz', browserTz);
 
                 const updateRes = await fetch(`/api/reminders/${id}`, {
                     method: 'PUT',
@@ -686,12 +709,6 @@
                 const modal = document.getElementById('add-modal');
                 if (!modal.classList.contains('hidden')) hideAddModal();
             }
-        });
-
-        // Load logs on page load
-        window.addEventListener('load', function() {
-            loadLogs();
-            loadHeartbeatSettings();
         });
 
         async function loadHeartbeatSettings() {
@@ -976,15 +993,22 @@
         }
 
         function showConfigView(type) {
-            // Hide main operational view
+            // Hide all main views
             document.getElementById('view-main').classList.add('hidden');
             document.getElementById('view-services').classList.add('hidden');
             document.getElementById('view-heartbeat').classList.add('hidden');
+            const timeView = document.getElementById('view-time');
+            if (timeView) timeView.classList.add('hidden');
 
             if (type === 'services') {
                 document.getElementById('view-services').classList.remove('hidden');
             } else if (type === 'heartbeat') {
                 document.getElementById('view-heartbeat').classList.remove('hidden');
+            } else if (type === 'time') {
+                if (timeView) {
+                    timeView.classList.remove('hidden');
+                    loadTimeSettings();   // fetch current mode + start live clocks
+                }
             }
         }
 
@@ -995,6 +1019,7 @@
             loadChannels();
             loadDashboardStats();
             startLiveClock();
+            refreshVersionBadge();   // always fetch latest version from API (helps with caching)
 
             // Show main view by default
             document.getElementById('view-main').classList.remove('hidden');
@@ -1015,7 +1040,7 @@
                 });
             }
             update();
-            setInterval(update, 30000);
+            setInterval(update, 10000); // update every 10s for a more live feel
         }
 
         async function loadDashboardStats() {
@@ -1035,6 +1060,174 @@
                 console.error('Failed to load dashboard stats', err);
             }
         }
+
+        async function refreshVersionBadge() {
+            try {
+                const res = await fetch('/api/version');
+                const data = await res.json();
+                const badge = document.getElementById('app-version-badge');
+                if (badge && data.version) {
+                    badge.textContent = 'v' + data.version;
+                }
+            } catch (e) {
+                // silent fail - server-side version is already shown
+            }
+        }
+
+        // =====================================================================
+        // Time & Date Sync UI (NTP vs Local PC)
+        // =====================================================================
+
+        let currentTimeMode = 'server';
+        let timeClocksInterval = null;
+
+        async function loadTimeSettings() {
+            // Stop any previous clock polling when leaving the view
+            if (timeClocksInterval) {
+                clearInterval(timeClocksInterval);
+                timeClocksInterval = null;
+            }
+
+            try {
+                const res = await fetch('/api/settings/time');
+                const data = await res.json();
+
+                currentTimeMode = data.mode || 'server';
+
+                // Populate server tz label (from backend)
+                const serverTzEl = document.getElementById('server-tz-label');
+                if (serverTzEl) serverTzEl.textContent = data.server_timezone || '—';
+
+                // Highlight the correct card
+                highlightTimeModeCard(currentTimeMode);
+
+                // Start live comparison clocks
+                startTimeComparisonClocks();
+
+            } catch (err) {
+                console.error('Failed to load time settings', err);
+                // Fallback: still allow local selection
+                highlightTimeModeCard('server');
+            }
+        }
+
+        function highlightTimeModeCard(mode) {
+            const serverCard = document.getElementById('mode-card-server');
+            const localCard = document.getElementById('mode-card-local');
+
+            if (!serverCard || !localCard) return;
+
+            if (mode === 'server') {
+                serverCard.classList.add('border-emerald-600');
+                serverCard.classList.remove('border-zinc-700');
+                localCard.classList.remove('border-sky-500');
+                localCard.classList.add('border-zinc-700');
+            } else {
+                localCard.classList.add('border-sky-500');
+                localCard.classList.remove('border-zinc-700');
+                serverCard.classList.remove('border-emerald-600');
+                serverCard.classList.add('border-zinc-700');
+            }
+        }
+
+        function selectTimeMode(mode) {
+            currentTimeMode = mode;
+            highlightTimeModeCard(mode);
+        }
+
+        async function saveTimeMode() {
+            const statusArea = document.getElementById('time-diff'); // reuse the diff area for status
+            if (!statusArea) return;
+
+            const originalText = statusArea.textContent;
+
+            statusArea.textContent = 'Saving...';
+            statusArea.classList.add('text-emerald-400');
+
+            try {
+                const formData = new FormData();
+                formData.append('mode', currentTimeMode);
+
+                const res = await fetch('/api/settings/time', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    statusArea.textContent = '✅ Saved! ' + (data.message || '');
+                    setTimeout(() => {
+                        statusArea.textContent = originalText || '—';
+                        statusArea.classList.remove('text-emerald-400');
+                    }, 2200);
+                } else {
+                    statusArea.textContent = '❌ ' + (data.error || 'Failed');
+                    setTimeout(() => {
+                        statusArea.textContent = originalText || '—';
+                        statusArea.classList.remove('text-emerald-400');
+                    }, 3000);
+                }
+            } catch (err) {
+                statusArea.textContent = '❌ Network error';
+                setTimeout(() => {
+                    statusArea.textContent = originalText || '—';
+                    statusArea.classList.remove('text-emerald-400');
+                }, 3000);
+            }
+        }
+
+        function startTimeComparisonClocks() {
+            const serverEl = document.getElementById('server-time-now');
+            const browserEl = document.getElementById('browser-time-now');
+            const diffEl = document.getElementById('time-diff');
+
+            if (!serverEl || !browserEl || !diffEl) return;
+
+            // Set browser tz label once
+            const browserTzEl = document.getElementById('browser-tz-label');
+            const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+            if (browserTzEl) browserTzEl.textContent = browserTz || 'Local';
+
+            async function tick() {
+                // Browser time (always accurate to user's PC)
+                const bNow = new Date();
+                browserEl.textContent = bNow.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+                // Server time
+                try {
+                    const res = await fetch('/api/server-time');
+                    const s = await res.json();
+                    // We show the server "local" time in its configured zone
+                    serverEl.textContent = s.server_local || s.utc || '—';
+
+                    // Calculate rough difference in minutes
+                    const serverEpoch = s.epoch || Math.floor(Date.now() / 1000);
+                    const browserEpoch = Math.floor(bNow.getTime() / 1000);
+                    const deltaMin = Math.round((browserEpoch - serverEpoch) / 60);
+
+                    if (Math.abs(deltaMin) <= 1) {
+                        diffEl.textContent = 'Almost identical (±1 min)';
+                        diffEl.className = 'font-mono text-xl font-semibold text-emerald-400';
+                    } else if (Math.abs(deltaMin) < 5) {
+                        diffEl.textContent = `${deltaMin > 0 ? '+' : ''}${deltaMin} min`;
+                        diffEl.className = 'font-mono text-xl font-semibold text-amber-400';
+                    } else {
+                        diffEl.textContent = `${deltaMin > 0 ? '+' : ''}${deltaMin} min — clocks are quite different!`;
+                        diffEl.className = 'font-mono text-xl font-semibold text-red-400';
+                    }
+                } catch (e) {
+                    serverEl.textContent = '—';
+                    diffEl.textContent = 'Unable to reach server';
+                    diffEl.className = 'font-mono text-xl font-semibold text-zinc-500';
+                }
+            }
+
+            tick(); // immediate
+            timeClocksInterval = setInterval(tick, 8000); // refresh every 8s while view is open
+        }
+
+        // Make sure we stop the interval when user navigates away from the time view
+        // (simple approach: the next loadTimeSettings clears it)
     </script>
 </body>
 </html>
