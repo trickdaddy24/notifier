@@ -1,6 +1,16 @@
-# Dockerfile for Notifier Web Backend (FastAPI)
-FROM python:3.11-slim
+# syntax=docker/dockerfile:1
+# ---- Stage 1: compile the Tailwind CSS from the templates ----
+# Keeps web/static/app.css always in sync with the templates at build time,
+# so adding Tailwind classes never requires a manual rebuild/commit.
+FROM node:20-slim AS css
+WORKDIR /build
+COPY tailwind.config.js ./
+COPY web/static/src/input.css ./web/static/src/input.css
+COPY web/templates/ ./web/templates/
+RUN npx -y tailwindcss@3.4.17 -i ./web/static/src/input.css -o ./web/static/app.css --minify
 
+# ---- Stage 2: the FastAPI app ----
+FROM python:3.11-slim
 WORKDIR /app
 
 # Install system dependencies
@@ -21,6 +31,11 @@ COPY notifier/__init__.py ./notifier/__init__.py
 
 # Copy web application code
 COPY web/ ./web/
+
+# Overlay the freshly-built CSS (overrides the committed copy so the image
+# always reflects the current templates)
+COPY --from=css /build/web/static/app.css ./web/static/app.css
+
 COPY .env.example .env.example
 
 # Create directory for database (will be mounted as volume)
