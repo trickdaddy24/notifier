@@ -7,7 +7,9 @@
     <!-- Self-hosted Tailwind build (see tailwind.config.js); replaces the
          unreliable cdn.tailwindcss.com Play CDN that left the page unstyled. -->
     <link rel="stylesheet" href="/static/app.css">
+    <link rel="stylesheet" href="/static/vendor/flatpickr/dark.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <script src="/static/vendor/flatpickr/flatpickr.min.js"></script>
     <style>
         body { font-family: 'Inter', system_ui, sans-serif; }
         .font-display { font-family: 'Space Grotesk', 'Inter', sans-serif; }
@@ -423,38 +425,38 @@
         </div>
     </div>
 
-    <!-- Add Reminder Modal -->
-    <div id="add-modal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-        <div class="bg-zinc-900 border border-zinc-700 rounded-3xl w-full max-w-lg mx-4 overflow-hidden">
+    <!-- Add / Edit Reminder Modal -->
+    <div id="add-modal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+        <div class="bg-zinc-900 border border-zinc-700 rounded-3xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
             <div class="px-6 py-5 border-b border-zinc-800 flex items-center justify-between">
-                <h3 class="text-lg font-semibold">Add New Reminder</h3>
+                <h3 id="modal-title" class="text-lg font-semibold">Add New Reminder</h3>
                 <button onclick="hideAddModal()" class="text-zinc-400 hover:text-white text-2xl leading-none">&times;</button>
             </div>
 
             <form id="add-reminder-form" onsubmit="submitReminder(event)" class="p-6 space-y-5">
-                <input type="hidden" name="id" id="reminder-id">
                 <div>
                     <label class="block text-sm text-zinc-400 mb-1.5">Message</label>
-                    <textarea name="message" required rows="3"
+                    <textarea name="message" required rows="2"
                               class="w-full bg-zinc-950 border border-zinc-800 focus:border-emerald-600 rounded-2xl px-4 py-3 text-sm resize-y"
                               placeholder="Take out the trash, pay rent, call mom..."></textarea>
                 </div>
 
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                        <label class="block text-sm text-zinc-400 mb-1.5">Due Date &amp; Time</label>
-                        <input type="datetime-local" name="due" required
-                               class="w-full bg-zinc-950 border border-zinc-800 focus:border-emerald-600 rounded-2xl px-4 py-3 text-sm">
-                    </div>
-                    <div>
-                        <label class="block text-sm text-zinc-400 mb-1.5">Repeat</label>
-                        <select name="recurrence" class="w-full bg-zinc-950 border border-zinc-800 focus:border-emerald-600 rounded-2xl px-4 py-3 text-sm">
-                            <option value="">One time only</option>
-                            <option value="daily">Daily</option>
-                            <option value="weekly">Weekly</option>
-                            <option value="monthly">Monthly</option>
-                        </select>
-                    </div>
+                <div>
+                    <label class="block text-sm text-zinc-400 mb-1.5">Due Date &amp; Time</label>
+                    <!-- flatpickr renders an inline calendar right below this input -->
+                    <input type="text" name="due" id="due-input" required readonly
+                           class="w-full bg-zinc-950 border border-zinc-800 focus:border-emerald-600 rounded-2xl px-4 py-3 text-sm mb-2"
+                           placeholder="Pick a date &amp; time">
+                </div>
+
+                <div>
+                    <label class="block text-sm text-zinc-400 mb-1.5">Repeat</label>
+                    <select name="recurrence" class="w-full bg-zinc-950 border border-zinc-800 focus:border-emerald-600 rounded-2xl px-4 py-3 text-sm">
+                        <option value="">One time only</option>
+                        <option value="daily">Daily</option>
+                        <option value="weekly">Weekly</option>
+                        <option value="monthly">Monthly</option>
+                    </select>
                 </div>
 
                 <div class="flex gap-3 pt-2">
@@ -462,7 +464,7 @@
                             class="flex-1 px-4 py-3 rounded-2xl bg-zinc-800 hover:bg-zinc-700 text-sm font-medium transition-colors">
                         Cancel
                     </button>
-                    <button type="submit"
+                    <button type="submit" id="modal-submit-btn"
                             class="flex-1 px-4 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-sm font-semibold transition-colors">
                         Add Reminder
                     </button>
@@ -472,23 +474,38 @@
     </div>
 
     <script>
-        function showAddModal() {
+        // Reminder data (keyed by id) for prefilling the edit form — no extra API call.
+        window.REMINDERS = Object.fromEntries(
+            ({{ reminders | tojson }}).map(r => [r.id, r])
+        );
+        let editingId = null;   // null = add mode, otherwise the reminder id being edited
+        let duePicker = null;   // the flatpickr instance on #due-input
+
+        document.addEventListener('DOMContentLoaded', () => {
+            duePicker = flatpickr('#due-input', {
+                inline: true,            // always-visible month grid inside the modal
+                enableTime: true,
+                dateFormat: 'Y-m-d H:i', // value submitted as "YYYY-MM-DD HH:MM" (backend parses as-is)
+                time_24hr: false,
+                minuteIncrement: 5,
+            });
+        });
+
+        function openModal() {
             const modal = document.getElementById('add-modal');
             modal.classList.remove('hidden');
             modal.classList.add('flex');
+        }
 
-            // Set default due time to 1 hour from now
-            const input = document.querySelector('#add-reminder-form input[name="due"]');
-            if (input) {
-                const now = new Date();
-                now.setHours(now.getHours() + 1);
-                // datetime-local expects LOCAL wall-clock time; toISOString()
-                // returns UTC, which made the default appear hours off. Build
-                // the YYYY-MM-DDTHH:MM string from local getters instead.
-                const pad = (n) => String(n).padStart(2, '0');
-                input.value = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
-                            + `T${pad(now.getHours())}:${pad(now.getMinutes())}`;
-            }
+        function showAddModal() {
+            editingId = null;
+            document.getElementById('add-reminder-form').reset();
+            document.getElementById('modal-title').textContent = 'Add New Reminder';
+            document.getElementById('modal-submit-btn').textContent = 'Add Reminder';
+            const now = new Date();
+            now.setHours(now.getHours() + 1);     // default ~1h ahead, local time
+            if (duePicker) duePicker.setDate(now, true);
+            openModal();
         }
 
         function hideAddModal() {
@@ -496,6 +513,7 @@
             modal.classList.remove('flex');
             modal.classList.add('hidden');
             document.getElementById('add-reminder-form').reset();
+            editingId = null;
         }
 
         async function submitReminder(e) {
@@ -507,22 +525,21 @@
             const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
             if (browserTz) formData.append('browser_tz', browserTz);
 
+            const url = editingId ? `/api/reminders/${editingId}` : '/api/reminders';
+            const method = editingId ? 'PUT' : 'POST';
+
             try {
-                const res = await fetch('/api/reminders', {
-                    method: 'POST',
-                    body: formData
-                });
+                const res = await fetch(url, { method, body: formData });
                 const data = await res.json();
 
                 if (res.ok && data.success) {
                     hideAddModal();
-                    // Reload the page so the new reminder appears in the list
                     window.location.reload();
                 } else {
-                    alert(data.error || 'Failed to add reminder');
+                    alert(data.error || 'Failed to save reminder');
                 }
             } catch (err) {
-                alert('Network error while adding reminder');
+                alert('Network error while saving reminder');
             }
         }
 
@@ -541,40 +558,20 @@
             }
         }
 
-        async function editReminder(id) {
-            try {
-                const res = await fetch(`/api/reminders/${id}`);  // Note: we don't have GET single yet, using reload for simplicity or we can enhance later
-                // For now, simple approach: reload page and use browser to remember, but better to fetch properly.
-                // Quick implementation: open add modal prefilled via separate call if needed.
-                // For this iteration, we'll use a simple prompt-based edit for speed.
-                const currentMsg = prompt("New message:");
-                if (!currentMsg) return;
-
-                const newDue = prompt("New due (YYYY-MM-DD HH:MM):");
-                if (!newDue) return;
-
-                const formData = new FormData();
-                formData.append('message', currentMsg);
-                formData.append('due', newDue.replace(' ', 'T')); // rough format
-                formData.append('recurrence', '');
-                // Send browser tz so "Local PC" time mode works on edits too
-                const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
-                if (browserTz) formData.append('browser_tz', browserTz);
-
-                const updateRes = await fetch(`/api/reminders/${id}`, {
-                    method: 'PUT',
-                    body: formData
-                });
-
-                if (updateRes.ok) {
-                    window.location.reload();
-                } else {
-                    const err = await updateRes.json();
-                    alert('Edit failed: ' + (err.error || 'Unknown'));
-                }
-            } catch (err) {
-                alert('Error editing reminder');
-            }
+        function editReminder(id) {
+            const r = window.REMINDERS[id];
+            if (!r) { alert('Reminder not found — try refreshing the page.'); return; }
+            editingId = id;
+            const form = document.getElementById('add-reminder-form');
+            form.reset();
+            form.querySelector('[name="message"]').value = r.message || '';
+            // Preserve the existing recurrence (the old prompt-based edit wiped it).
+            form.querySelector('[name="recurrence"]').value = r.recurrence || '';
+            document.getElementById('modal-title').textContent = 'Edit Reminder';
+            document.getElementById('modal-submit-btn').textContent = 'Save Changes';
+            // due_time is stored as "YYYY-MM-DD HH:MM", matching the picker's dateFormat.
+            if (duePicker) duePicker.setDate(r.due_time, true, 'Y-m-d H:i');
+            openModal();
         }
 
         async function loadLogs() {
