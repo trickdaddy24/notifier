@@ -5,7 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [v2.3.0] - 2026-05-28  *(Latest)*
+## [v2.4.0] - 2026-05-30  *(Latest)*
+
+### Added
+
+- Unified the CLI and web UI onto a single delivery engine — all 4 senders (Telegram, Discord, Pushover, Gmail) with retry/backoff and recurrence now live in notifier/notifications.py, fixing web reminders that never repeated, dead email delivery, and the unregistered Pushover channel. Fixed the python notifier.py entry point (absolute imports) and removed ~330 lines of duplicated logic. Consolidated the version string to a single __version__ anchor in notifier/__init__.py with all fallbacks pointing at it (web version display was permanently stuck on a stale fallback — now fixed). Repaired the smoke test and added a pytest engine suite (recurrence, mark-sent, credentials).
+
+## [v2.3.2] - 2026-05-29
+
+### Changed
+
+- Mobile responsiveness and UI polish improvements across dashboard, top nav, tables, and Time Sync view.
+
+## [v2.3.1] - 2026-05-29
+
+### Fixed
+
+- Removed temporary debug banner. Cleaned up deployment artifacts. Continuing Phase 2.
+
+## [v2.3.0] - 2026-05-28
 
 ### Added
 
