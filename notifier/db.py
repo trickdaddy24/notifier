@@ -126,15 +126,38 @@ def init_db(backfill_legacy: bool = True) -> None:
             )
         ''')
 
+        # Countdown events table. An event (e.g. a cruise) is the source of
+        # truth for a countdown; it "expands" into one ordinary notifications
+        # row per future milestone (see expand_event), so the existing
+        # scheduler delivers the countdown pings with no special-casing.
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS events (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                title        TEXT NOT NULL,
+                target_date  TEXT NOT NULL,                       -- "YYYY-MM-DD"
+                target_ts    INTEGER NOT NULL DEFAULT 0,          -- epoch at send_time, in TIMEZONE
+                category     TEXT DEFAULT NULL,                   -- e.g. "cruise" (flavours the message) or NULL
+                details      TEXT DEFAULT NULL,                   -- freeform note (ship, confirmation #, ...)
+                milestones   TEXT NOT NULL DEFAULT '60,30,14,7,3,1,0',  -- CSV of day-offsets before target
+                send_time    TEXT NOT NULL DEFAULT '09:00',       -- HH:MM (local) each milestone fires at
+                created_ts   INTEGER NOT NULL DEFAULT 0,
+                active       INTEGER NOT NULL DEFAULT 1
+            )
+        ''')
+
         # Indexes
         c.execute("CREATE INDEX IF NOT EXISTS idx_notifications_due ON notifications(sent, due_ts)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_logs_time ON logs(timestamp)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_events_target ON events(active, target_ts)")
 
         # Migrations for older databases
         for col, definition in [
             ("due_ts", "INTEGER DEFAULT 0"),
             ("recurrence", "TEXT DEFAULT NULL"),
             ("repeat_time", "TEXT DEFAULT NULL"),
+            # Links a milestone notification back to its countdown event so
+            # editing/deleting the event can re-expand or clean up its pings.
+            ("event_id", "INTEGER DEFAULT NULL"),
         ]:
             try:
                 c.execute(f"ALTER TABLE notifications ADD COLUMN {col} {definition}")
@@ -155,6 +178,12 @@ def init_db(backfill_legacy: bool = True) -> None:
                     pass
 
         conn.commit()
+
+    # First-run seed of countdown events (e.g. migrated from cruise-notifier's
+    # cruises.json). Guarded by a settings flag so deleting every event does
+    # not cause it to reappear on the next startup. Done after the connection
+    # above is closed because create_event opens its own.
+    _seed_events_once()
 
 
 def get_setting(key: str, default: str = None) -> str:
@@ -367,3 +396,303 @@ def _next_recurrence_ts(due_ts: int, recurrence: str,
     while next_ts <= now_ts:
         next_ts += step
     return next_ts
+
+
+# ---------------------------------------------------------------------------
+# Countdown events (shared by CLI and Web UI)
+#
+# An "event" is a target date you want to be reminded about as it approaches
+# (a cruise, a trip, a birthday, a launch). Rather than inventing a second
+# scheduler, an event is *expanded* into ordinary `notifications` rows — one
+# per future milestone (e.g. 30 days before, 7 days before, the day itself) —
+# which the existing send_notifications() loop then delivers across every
+# configured channel. The events table stays the editable source of truth;
+# the notifications it spawns carry its `event_id` so they can be regenerated
+# on edit and cleaned up on delete.
+# ---------------------------------------------------------------------------
+
+DEFAULT_MILESTONES = "60,30,14,7,3,1,0"
+DEFAULT_EVENT_SEND_TIME = "09:00"
+
+# Migrated from cruise-notifier's cruises.json — seeded on first run only.
+SEED_EVENTS = [
+    # (title, target_date, category, details)
+    ("Carnival Celebration", "7/12/26", "cruise", None),
+    ("Paying for the Cruise", "4/13/26", "cruise", None),
+]
+
+
+def _parse_event_date(value: str):
+    """Parse a calendar date for a countdown event into a `date`.
+
+    Accepts ISO (YYYY-MM-DD) plus the US m/d/yy and m/d/yyyy forms that
+    cruise-notifier used, with '-' or '/' separators. Returns None on failure.
+    """
+    if not value:
+        return None
+    value = value.strip()
+    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y", "%m-%d-%Y", "%m-%d-%y"):
+        try:
+            return datetime.strptime(value, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _parse_milestones(csv: str) -> list[int]:
+    """Parse a CSV of day-offsets into a sorted, de-duped, descending list.
+
+    Negative values are dropped; 0 (the day itself) is allowed. Falls back to
+    the default set when nothing valid is supplied.
+    """
+    out: set[int] = set()
+    for part in (csv or "").split(","):
+        part = part.strip()
+        if part.lstrip("-").isdigit():
+            v = int(part)
+            if v >= 0:
+                out.add(v)
+    if not out:
+        out = {int(x) for x in DEFAULT_MILESTONES.split(",")}
+    return sorted(out, reverse=True)
+
+
+def _event_target_dt(target_date: str, send_time: str) -> Optional[datetime]:
+    """Naive local datetime for an event's target date at its send time."""
+    d = _parse_event_date(target_date)
+    if d is None:
+        return None
+    try:
+        h, m = map(int, (send_time or DEFAULT_EVENT_SEND_TIME).split(":"))
+    except (ValueError, AttributeError):
+        h, m = 9, 0
+    return datetime(d.year, d.month, d.day, h, m)
+
+
+def days_until(target_date: str) -> Optional[int]:
+    """Whole days from today until the target date (negative if past)."""
+    d = _parse_event_date(target_date)
+    if d is None:
+        return None
+    return (d - _now_in_tz().date()).days
+
+
+def format_event_message(title: str, days_left: int, target_date: str,
+                         category: Optional[str] = None,
+                         details: Optional[str] = None) -> str:
+    """Human countdown message for one milestone.
+
+    `days_left` is the milestone offset (60, 30, ... 0). Cruise events get a
+    nautical flavour; everything else gets a neutral calendar style.
+    """
+    cruise = (category or "").lower() == "cruise"
+    icon = "🚢" if cruise else "📅"
+
+    if days_left > 1:
+        body = f"{days_left} days until {title} on {target_date}"
+    elif days_left == 1:
+        body = f"Tomorrow is the day — {title} on {target_date}"
+    else:
+        body = f"Today is the day — {title} on {target_date}"
+
+    msg = f"{icon} {body}!"
+    if cruise:
+        msg += " Bon voyage! 🌊" if days_left == 0 else " Anchors aweigh! ⚓"
+    if details:
+        msg += f"\n{details}"
+    return msg
+
+
+def create_event(title: str, target_date: str,
+                 category: Optional[str] = None,
+                 details: Optional[str] = None,
+                 milestones: Optional[str] = None,
+                 send_time: Optional[str] = None) -> Optional[int]:
+    """Insert a countdown event and expand it into milestone notifications.
+
+    Returns the new event id, or None if the date could not be parsed.
+    """
+    d = _parse_event_date(target_date)
+    if d is None:
+        return None
+    send_time = (send_time or DEFAULT_EVENT_SEND_TIME).strip()
+    milestones_csv = ",".join(str(x) for x in _parse_milestones(milestones or DEFAULT_MILESTONES))
+    canonical_date = d.strftime("%Y-%m-%d")
+    target_dt = _event_target_dt(canonical_date, send_time)
+    target_ts = _to_ts(target_dt) if target_dt else 0
+    now_ts = int(time.time())
+
+    with get_db() as conn:
+        c = conn.cursor()
+        c.execute(
+            "INSERT INTO events (title, target_date, target_ts, category, details,"
+            " milestones, send_time, created_ts, active)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)",
+            (title.strip(), canonical_date, target_ts, category or None,
+             details or None, milestones_csv, send_time, now_ts),
+        )
+        event_id = c.lastrowid
+        conn.commit()
+
+    expand_event(event_id)
+    return event_id
+
+
+def get_event(event_id: int) -> Optional[dict]:
+    """Return one event as a dict (with computed days_left), or None."""
+    with get_db() as conn:
+        c = conn.cursor()
+        c.execute("SELECT * FROM events WHERE id = ?", (event_id,))
+        row = c.fetchone()
+    if not row:
+        return None
+    event = dict(row)
+    event["days_left"] = days_until(event["target_date"])
+    return event
+
+
+def list_events(include_inactive: bool = True) -> list[dict]:
+    """Return events ordered by target date, each with a computed days_left
+    and a count of its still-pending milestone notifications."""
+    query = "SELECT * FROM events"
+    if not include_inactive:
+        query += " WHERE active = 1"
+    query += " ORDER BY target_ts ASC"
+    with get_db() as conn:
+        c = conn.cursor()
+        c.execute(query)
+        rows = [dict(r) for r in c.fetchall()]
+        for ev in rows:
+            ev["days_left"] = days_until(ev["target_date"])
+            c.execute(
+                "SELECT COUNT(*) FROM notifications WHERE event_id = ? AND sent = 0",
+                (ev["id"],),
+            )
+            ev["pending_milestones"] = c.fetchone()[0]
+    return rows
+
+
+def update_event(event_id: int, **fields) -> bool:
+    """Update an event's editable fields and re-expand its milestones.
+
+    Accepts any of: title, target_date, category, details, milestones,
+    send_time, active. Returns False if the event does not exist or a supplied
+    date is invalid.
+    """
+    existing = get_event(event_id)
+    if not existing:
+        return False
+
+    title = fields.get("title", existing["title"])
+    target_date = fields.get("target_date", existing["target_date"])
+    category = fields.get("category", existing["category"])
+    details = fields.get("details", existing["details"])
+    send_time = (fields.get("send_time", existing["send_time"]) or DEFAULT_EVENT_SEND_TIME).strip()
+    milestones_csv = ",".join(
+        str(x) for x in _parse_milestones(fields.get("milestones", existing["milestones"]))
+    )
+    active = int(fields.get("active", existing["active"]))
+
+    d = _parse_event_date(target_date)
+    if d is None:
+        return False
+    canonical_date = d.strftime("%Y-%m-%d")
+    target_dt = _event_target_dt(canonical_date, send_time)
+    target_ts = _to_ts(target_dt) if target_dt else 0
+
+    with get_db() as conn:
+        c = conn.cursor()
+        c.execute(
+            "UPDATE events SET title=?, target_date=?, target_ts=?, category=?,"
+            " details=?, milestones=?, send_time=?, active=? WHERE id=?",
+            (title.strip(), canonical_date, target_ts, category or None,
+             details or None, milestones_csv, send_time, active, event_id),
+        )
+        conn.commit()
+
+    expand_event(event_id)
+    return True
+
+
+def delete_event(event_id: int) -> bool:
+    """Delete an event and its still-pending milestone notifications.
+
+    Already-sent milestones are kept so the activity log stays intact.
+    """
+    with get_db() as conn:
+        c = conn.cursor()
+        c.execute("SELECT id FROM events WHERE id = ?", (event_id,))
+        if not c.fetchone():
+            return False
+        c.execute("DELETE FROM notifications WHERE event_id = ? AND sent = 0", (event_id,))
+        c.execute("DELETE FROM events WHERE id = ?", (event_id,))
+        conn.commit()
+    return True
+
+
+def expand_event(event_id: int) -> int:
+    """(Re)generate the pending milestone notifications for an event.
+
+    Clears any unsent notifications already linked to the event, then inserts
+    one per milestone whose fire time is still in the future. Returns the count
+    inserted. Past milestones (and the day-of, if its send time has passed) are
+    skipped so we never back-fire on creation or edit.
+    """
+    event = get_event(event_id)
+    if not event:
+        return 0
+
+    now_ts = int(time.time())
+    offsets = _parse_milestones(event["milestones"])
+    target_dt = _event_target_dt(event["target_date"], event["send_time"])
+    if target_dt is None:
+        return 0
+
+    inserted = 0
+    with get_db() as conn:
+        c = conn.cursor()
+        # Wipe stale pending pings for this event (keeps sent history).
+        c.execute("DELETE FROM notifications WHERE event_id = ? AND sent = 0", (event_id,))
+
+        if not event["active"]:
+            conn.commit()
+            return 0
+
+        for offset in offsets:
+            milestone_dt = target_dt - timedelta(days=offset)
+            milestone_ts = _to_ts(milestone_dt)
+            if milestone_ts <= now_ts:
+                continue  # already in the past — don't back-fire
+            message = format_event_message(
+                event["title"], offset, event["target_date"],
+                event["category"], event["details"],
+            )
+            due_str = milestone_dt.strftime("%Y-%m-%d %H:%M")
+            c.execute(
+                "INSERT INTO notifications (message, due_time, due_ts, sent,"
+                " recurrence, repeat_time, event_id) VALUES (?, ?, ?, 0, NULL, NULL, ?)",
+                (message, due_str, milestone_ts, event_id),
+            )
+            inserted += 1
+        conn.commit()
+    return inserted
+
+
+def _seed_events_once() -> None:
+    """Seed SEED_EVENTS the first time the events table is used (idempotent).
+
+    Uses a settings flag rather than an empty-table check so that deleting all
+    seeded events does not make them reappear on the next startup.
+    """
+    # Opt-out for tests (and anyone who wants a pristine empty DB).
+    if os.getenv("NOTIFIER_SKIP_EVENT_SEED", "").strip().lower() in ("1", "true", "yes"):
+        return
+    try:
+        if get_setting("events_seeded"):
+            return
+        for title, target_date, category, details in SEED_EVENTS:
+            create_event(title, target_date, category=category, details=details)
+        set_setting("events_seeded", "1")
+    except Exception:
+        # Seeding is best-effort; never let it block startup.
+        pass

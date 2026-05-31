@@ -77,6 +77,9 @@ from notifier.db import (
     get_db, init_db, DB_PATH as DB_NAME,
     _get_user_tz, _now_in_tz, _tz_label, _to_ts, _from_ts, _relative_due,
     _parse_due_time, _next_daily_time, _next_month_dt, _next_recurrence_ts,
+    create_event, list_events, get_event, update_event, delete_event,
+    days_until, _parse_event_date, _parse_milestones,
+    DEFAULT_MILESTONES, DEFAULT_EVENT_SEND_TIME,
 )
 from notifier.notifications import (
     CHANNELS, db_log, _channel_configured, _is_transient, _deliver,
@@ -764,6 +767,147 @@ def import_notifications_from_json():
     print(f"{Fore.GREEN}✅ Imported {imported} notifications, skipped {skipped}.{Style.RESET_ALL}")
     db_log(None, "system", "IMPORT", f"Imported {imported}, skipped {skipped}, file={file_path}")
 
+# ── Countdown events / cruises ───────────────────────────────────────────────
+
+def _event_days_label(days_left):
+    """Colored 'in N days' / 'today!' / 'passed' label for an event."""
+    if days_left is None:
+        return f"{Fore.RED}bad date{Style.RESET_ALL}"
+    if days_left > 1:
+        return f"{Fore.CYAN}{Style.BRIGHT}{days_left} days{Style.RESET_ALL}"
+    if days_left == 1:
+        return f"{Fore.YELLOW}{Style.BRIGHT}tomorrow!{Style.RESET_ALL}"
+    if days_left == 0:
+        return f"{Fore.GREEN}{Style.BRIGHT}TODAY!{Style.RESET_ALL}"
+    return f"{Fore.WHITE}{Style.DIM}passed{Style.RESET_ALL}"
+
+
+def events_menu():
+    """Manage countdown events — cruises, trips, birthdays, deadlines.
+
+    Each event expands into milestone notifications delivered by the shared
+    scheduler, so nothing here sends directly: it just edits the source rows.
+    """
+    while True:
+        events = list_events()
+        _box(Fore.CYAN, "📅 EVENTS / COUNTDOWNS")
+        if events:
+            for ev in events:
+                icon = "🚢" if (ev.get("category") or "").lower() == "cruise" else "📅"
+                pending = ev.get("pending_milestones", 0)
+                print(f"  {Fore.YELLOW}{Style.BRIGHT}#{ev['id']}{Style.RESET_ALL}  "
+                      f"{icon} {Fore.WHITE}{Style.BRIGHT}{ev['title']}{Style.RESET_ALL}  "
+                      f"{Fore.WHITE}{Style.DIM}{ev['target_date']}{Style.RESET_ALL}  "
+                      f"[{_event_days_label(ev['days_left'])}{Fore.WHITE}{Style.DIM}]{Style.RESET_ALL}")
+                print(f"     {Fore.WHITE}{Style.DIM}milestones: {ev['milestones']}  "
+                      f"at {ev['send_time']}  •  {pending} upcoming ping(s){Style.RESET_ALL}")
+        else:
+            print(f"  {Fore.YELLOW}⚠️  No events yet. Add a cruise, trip, or any date to count down to.{Style.RESET_ALL}")
+        _div()
+        _opt("A", Fore.GREEN + Style.BRIGHT, "➕", "Add Event")
+        _opt("E", Fore.BLUE  + Style.BRIGHT, "✏️ ", "Edit Event")
+        _opt("R", Fore.RED,                   "🗑️ ", "Remove Event")
+        _opt("0", Fore.RED + Style.DIM,       "⬅️ ", "Back to Main Menu")
+        choice = _prompt("Choose: ").strip().upper()
+
+        if choice == "A":
+            _add_event_interactive()
+        elif choice == "E":
+            _edit_event_interactive()
+        elif choice == "R":
+            _remove_event_interactive()
+        elif choice == "0":
+            break
+
+
+def _add_event_interactive():
+    title = input(f"\n  {Fore.YELLOW}▶  Event title (e.g. Carnival Celebration): {Style.RESET_ALL}").strip()
+    if not title:
+        print(f"{Fore.RED}❌ Title cannot be empty.{Style.RESET_ALL}")
+        return
+    date_raw = input(f"  {Fore.YELLOW}▶  Target date (YYYY-MM-DD or m/d/yy): {Style.RESET_ALL}").strip()
+    if _parse_event_date(date_raw) is None:
+        print(f"{Fore.RED}❌ Invalid date. Use YYYY-MM-DD or m/d/yy (e.g. 7/12/26).{Style.RESET_ALL}")
+        return
+
+    is_cruise = _prompt("Is this a cruise? (y/N): ").lower() == "y"
+    category = "cruise" if is_cruise else None
+
+    details = input(f"  {Fore.YELLOW}▶  Details (ship, confirmation #, optional): {Style.RESET_ALL}").strip() or None
+
+    ms_raw = input(f"  {Fore.YELLOW}▶  Milestones in days-before (Enter for '{DEFAULT_MILESTONES}'): {Style.RESET_ALL}").strip()
+    milestones = ms_raw or DEFAULT_MILESTONES
+    if not _parse_milestones(milestones):
+        print(f"{Fore.RED}❌ No valid milestones. Using default.{Style.RESET_ALL}")
+        milestones = DEFAULT_MILESTONES
+
+    time_raw = input(f"  {Fore.YELLOW}▶  Time of day to notify ({_tz_label()}, Enter for '{DEFAULT_EVENT_SEND_TIME}'): {Style.RESET_ALL}").strip()
+    send_time = time_raw or DEFAULT_EVENT_SEND_TIME
+    try:
+        datetime.strptime(send_time, "%H:%M")
+    except ValueError:
+        print(f"{Fore.RED}❌ Invalid time. Using {DEFAULT_EVENT_SEND_TIME}.{Style.RESET_ALL}")
+        send_time = DEFAULT_EVENT_SEND_TIME
+
+    event_id = create_event(title, date_raw, category=category, details=details,
+                            milestones=milestones, send_time=send_time)
+    if event_id is None:
+        print(f"{Fore.RED}❌ Could not create event.{Style.RESET_ALL}")
+        return
+
+    ev = get_event(event_id)
+    pending = list_events()
+    pending_count = next((e["pending_milestones"] for e in pending if e["id"] == event_id), 0)
+    db_log(None, "system", "EVENT_CREATED",
+           f"{title} | {ev['target_date']} | category={category} | {pending_count} milestones armed")
+    label = _event_days_label(ev["days_left"])
+    print(f"{Fore.GREEN}✅ Added event #{event_id} '{title}' — {label}{Style.RESET_ALL} "
+          f"{Fore.WHITE}{Style.DIM}({pending_count} upcoming notification(s) scheduled){Style.RESET_ALL}")
+    if pending_count == 0:
+        print(f"  {Fore.YELLOW}⚠️  No upcoming milestones — the date (or all milestones) are in the past.{Style.RESET_ALL}")
+
+
+def _edit_event_interactive():
+    eid = input(f"\n  {Fore.YELLOW}▶  Event ID to edit: {Style.RESET_ALL}").strip()
+    if not eid.isdigit():
+        print(f"{Fore.RED}❌ Invalid ID.{Style.RESET_ALL}")
+        return
+    ev = get_event(int(eid))
+    if not ev:
+        print(f"{Fore.RED}❌ Event ID {eid} not found.{Style.RESET_ALL}")
+        return
+
+    print(f"  {Fore.WHITE}{Style.DIM}Press Enter to keep each current value.{Style.RESET_ALL}")
+    title = input(f"  {Fore.YELLOW}▶  Title [{ev['title']}]: {Style.RESET_ALL}").strip() or ev["title"]
+    date_raw = input(f"  {Fore.YELLOW}▶  Target date [{ev['target_date']}]: {Style.RESET_ALL}").strip() or ev["target_date"]
+    if _parse_event_date(date_raw) is None:
+        print(f"{Fore.RED}❌ Invalid date. Keeping original.{Style.RESET_ALL}")
+        date_raw = ev["target_date"]
+    details = input(f"  {Fore.YELLOW}▶  Details [{ev['details'] or ''}]: {Style.RESET_ALL}").strip()
+    details = details if details else ev["details"]
+    ms_raw = input(f"  {Fore.YELLOW}▶  Milestones [{ev['milestones']}]: {Style.RESET_ALL}").strip() or ev["milestones"]
+    time_raw = input(f"  {Fore.YELLOW}▶  Send time [{ev['send_time']}]: {Style.RESET_ALL}").strip() or ev["send_time"]
+
+    ok = update_event(int(eid), title=title, target_date=date_raw, details=details,
+                      milestones=ms_raw, send_time=time_raw)
+    if ok:
+        db_log(None, "system", "EVENT_EDITED", f"Updated event #{eid}")
+        print(f"{Fore.GREEN}✅ Event #{eid} updated and milestones rescheduled.{Style.RESET_ALL}")
+    else:
+        print(f"{Fore.RED}❌ Update failed.{Style.RESET_ALL}")
+
+
+def _remove_event_interactive():
+    eid = input(f"\n  {Fore.YELLOW}▶  Event ID to remove: {Style.RESET_ALL}").strip()
+    if not eid.isdigit():
+        print(f"{Fore.RED}❌ Invalid ID.{Style.RESET_ALL}")
+        return
+    if delete_event(int(eid)):
+        db_log(None, "system", "EVENT_DELETED", f"Deleted event #{eid}")
+        print(f"{Fore.GREEN}✅ Event #{eid} removed (its upcoming notifications were cleared).{Style.RESET_ALL}")
+    else:
+        print(f"{Fore.RED}❌ Event ID {eid} not found.{Style.RESET_ALL}")
+
 # ── Tkinter GUI ────────────────────────────────────────────────────────────────
 
 def launch_tkinter_gui():
@@ -1276,14 +1420,15 @@ def main():
         _opt(" 3", Fore.CYAN,                    "📤", "Send Due Notifications Now")
         _opt(" 4", Fore.BLUE   + Style.BRIGHT,  "✏️ ", "Edit Notification")
         _opt(" 5", Fore.RED,                     "🗑️ ", "Delete Notification")
+        _opt(" 6", Fore.CYAN   + Style.BRIGHT,  "📅", "Events / Countdowns")
         _div()
-        _opt(" 6", Fore.MAGENTA + Style.BRIGHT,  "📬", "Notification Services")
-        _opt(" 7", Fore.CYAN,                    "📜", "View Logs")
-        _opt(" 8", Fore.GREEN  + Style.BRIGHT,  "📤", "Export to JSON")
-        _opt(" 9", Fore.GREEN  + Style.BRIGHT,  "📥", "Import from JSON")
-        _opt("10", Fore.WHITE,                   "🖥️ ", "Open GUI (Tkinter)")
+        _opt(" 7", Fore.MAGENTA + Style.BRIGHT,  "📬", "Notification Services")
+        _opt(" 8", Fore.CYAN,                    "📜", "View Logs")
+        _opt(" 9", Fore.GREEN  + Style.BRIGHT,  "📤", "Export to JSON")
+        _opt("10", Fore.GREEN  + Style.BRIGHT,  "📥", "Import from JSON")
+        _opt("11", Fore.WHITE,                   "🖥️ ", "Open GUI (Tkinter)")
         _div()
-        _opt("11", Fore.WHITE,                   "⚙️ ", f"System  {Fore.CYAN}[{ver_str}]{Style.RESET_ALL}")
+        _opt("12", Fore.WHITE,                   "⚙️ ", f"System  {Fore.CYAN}[{ver_str}]{Style.RESET_ALL}")
         _div()
         _opt(" 0", Fore.RED + Style.DIM,         "🚪", "Exit")
 
@@ -1309,16 +1454,18 @@ def main():
         elif choice == "5":
             delete_notification()
         elif choice == "6":
-            notification_services_menu()
+            events_menu()
         elif choice == "7":
-            show_logs()
+            notification_services_menu()
         elif choice == "8":
-            export_notifications_to_json()
+            show_logs()
         elif choice == "9":
-            import_notifications_from_json()
+            export_notifications_to_json()
         elif choice == "10":
-            launch_tkinter_gui()
+            import_notifications_from_json()
         elif choice == "11":
+            launch_tkinter_gui()
+        elif choice == "12":
             system_menu()
         elif choice == "0":
             print(f"\n  {Fore.GREEN}{Style.BRIGHT}👋  Goodbye!{Style.RESET_ALL}\n")

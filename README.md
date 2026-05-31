@@ -14,7 +14,8 @@ A Python CLI tool for scheduling and delivering reminders across multiple notifi
 - **Audit log** — every send attempt is recorded to a `logs` table (channel, status, response) via `db_log()`
 - **File logging** — all activity written to `multi_channel_notifier.log` with automatic 5 MB rotation
 - **JSON import / export** — back up or bulk-load notifications from a JSON file
-- **Tkinter GUI** — optional graphical window for viewing, adding, and deleting reminders (menu option 10)
+- **Countdown events** — track a target date (cruise, trip, birthday, deadline) and get notified at milestones as it approaches (default 60/30/14/7/3/1/0 days, then "today's the day!")
+- **Tkinter GUI** — optional graphical window for viewing, adding, and deleting reminders (menu option 11)
 - **Desktop notifications** — optional Windows/macOS/Linux system toasts via `plyer`
 - **Full CRUD** — add, view, edit, and delete scheduled notifications
 - **Service health checks** — verify, set credentials, test, and show setup instructions for each integration
@@ -239,7 +240,7 @@ TIMEZONE=America/New_York
 HEARTBEAT_INTERVAL=6
 ```
 
-Each service is optional — unconfigured services are silently skipped when sending. You can verify, set credentials, and test each one from the **Notification Services** menu (option 6).
+Each service is optional — unconfigured services are silently skipped when sending. You can verify, set credentials, and test each one from the **Notification Services** menu (option 7).
 
 ### Telegram setup
 1. Message `@BotFather` → `/newbot` → copy the token
@@ -268,21 +269,22 @@ python notifier.py
 
 ```
 ╔═══════════════════════════════════════╗
-║  📋 NOTIFICATION MENU         v2.4.0 ║
+║  📋 NOTIFICATION MENU         v2.5.0 ║
 ╚═══════════════════════════════════════╝
   1  ➕  Add Notification
   2  📋  View Notifications
   3  📤  Send Due Notifications Now
   4  ✏️   Edit Notification
   5  🗑️   Delete Notification
+  6  📅  Events / Countdowns
   ─────────────────────────────────────
-  6  📬  Notification Services
-  7  📜  View Logs
-  8  📤  Export to JSON
-  9  📥  Import from JSON
- 10  🖥️   Open GUI (Tkinter)
+  7  📬  Notification Services
+  8  📜  View Logs
+  9  📤  Export to JSON
+ 10  📥  Import from JSON
+ 11  🖥️   Open GUI (Tkinter)
   ─────────────────────────────────────
- 11  ⚙️   System  [v2.4.0]
+ 12  ⚙️   System  [v2.5.0]
   ─────────────────────────────────────
   0  🚪  Exit
 ```
@@ -299,11 +301,33 @@ When adding, you are asked whether to repeat. If yes, choose:
 
 Due times are accepted as `YYYY-MM-DD HH:MM` or `MM-DD-YYYY HH:MM`.
 
-### View Logs (option 7)
+### Events / Countdowns (option 6)
+
+A **countdown event** is a target date you want to be reminded about repeatedly as
+it gets closer — a cruise, a trip, a birthday, a project deadline. Instead of a
+single reminder, you get a notification on each **milestone** (days before the
+date) plus one on the day itself.
+
+| Field | Notes |
+|---|---|
+| **Title** | What you're counting down to (e.g. `Carnival Celebration`) |
+| **Target date** | `YYYY-MM-DD` or US `m/d/yy` (e.g. `7/12/26`) |
+| **Cruise?** | Optional — adds 🚢 nautical phrasing to the messages |
+| **Details** | Optional freeform note (ship, cabin, confirmation #) |
+| **Milestones** | Comma-separated days-before; default `60,30,14,7,3,1,0` (`0` = the day itself) |
+| **Notify at** | Time of day each milestone fires (default `09:00`, in your configured timezone) |
+
+Under the hood, an event **expands into ordinary notifications** — one per future
+milestone — so they're delivered by the same scheduler and across the same
+channels as everything else. Milestones already in the past are skipped, and
+editing an event re-generates its upcoming pings. Events are managed from the web
+dashboard too (sidebar → **Events / Countdowns**).
+
+### View Logs (option 8)
 
 Shows the last 100 entries from the `logs` table — one row per channel per notification send attempt, with timestamp, channel name, status (`SUCCESS` / `SKIPPED` / `FAILED`), and the API response.
 
-### Export / Import JSON (options 8 & 9)
+### Export / Import JSON (options 9 & 10)
 
 - **Export** writes all current notifications to `notifications_export_YYYY-MM-DD_HH-MM-SS.json`
 - **Import** reads a JSON file (default: `notifications_import.json`) and bulk-inserts new entries, skipping duplicates
@@ -321,11 +345,11 @@ Expected JSON format:
 ]
 ```
 
-### System menu (option 11)
+### System menu (option 12)
 
 ```
 ╔═══════════════════════════════════════╗
-║  ⚙️  SYSTEM                   v2.4.0 ║
+║  ⚙️  SYSTEM                   v2.5.0 ║
 ╚═══════════════════════════════════════╝
   1  📜  View Version History
   2  ➕  Add New Version Release

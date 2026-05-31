@@ -23,6 +23,8 @@ def engine(tmp_path, monkeypatch):
     db_file = tmp_path / "test.db"
     monkeypatch.setenv("NOTIFIER_DB_PATH", str(db_file))
     monkeypatch.setenv("TIMEZONE", "America/Chicago")
+    # Keep the DB pristine — don't auto-seed the sample cruise events.
+    monkeypatch.setenv("NOTIFIER_SKIP_EVENT_SEED", "1")
 
     import notifier.db as db
     importlib.reload(db)
@@ -168,3 +170,104 @@ def test_channel_configured_reflects_credentials(engine, monkeypatch):
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "t")
     monkeypatch.setenv("TELEGRAM_CHAT_ID", "c")
     assert N._channel_configured(telegram) is True
+
+
+# ── Countdown events ───────────────────────────────────────────────────────────
+
+def _future_date(days):
+    from datetime import date, timedelta
+    return (date.today() + timedelta(days=days)).strftime("%Y-%m-%d")
+
+
+def _pending_for_event(db, event_id):
+    with db.get_db() as conn:
+        c = conn.cursor()
+        return c.execute(
+            "SELECT message, due_ts FROM notifications WHERE event_id = ? AND sent = 0 ORDER BY due_ts",
+            (event_id,),
+        ).fetchall()
+
+
+def test_create_event_expands_future_milestones(engine):
+    db, _ = engine
+    # 100 days out with these offsets -> all four are still in the future.
+    eid = db.create_event("Cruise", _future_date(100), category="cruise",
+                          milestones="60,30,7,0", send_time="09:00")
+    assert eid is not None
+    rows = _pending_for_event(db, eid)
+    assert len(rows) == 4, "every future milestone should become a notification"
+    # Earliest pending ping should be the 60-days-before one.
+    assert "60 days until Cruise" in rows[0]["message"]
+
+
+def test_event_skips_past_milestones(engine):
+    db, _ = engine
+    # 5 days out: the 60/30/14/7 milestones are already in the past, only 3,1,0 remain.
+    eid = db.create_event("Trip", _future_date(5), milestones="60,30,14,7,3,1,0")
+    rows = _pending_for_event(db, eid)
+    assert len(rows) == 3, f"only 3,1,0 should remain, got {len(rows)}"
+
+
+def test_event_entirely_in_past_creates_nothing(engine):
+    db, _ = engine
+    eid = db.create_event("Old cruise", _future_date(-10), milestones="7,1,0")
+    assert eid is not None  # event row still created (kept for history/view)
+    assert _pending_for_event(db, eid) == []
+
+
+def test_update_event_reexpands(engine):
+    db, _ = engine
+    eid = db.create_event("Move", _future_date(5), milestones="60,30,14,7,3,1,0")
+    assert len(_pending_for_event(db, eid)) == 3
+    # Push it far out -> all seven milestones now fit in the future.
+    assert db.update_event(eid, target_date=_future_date(100))
+    assert len(_pending_for_event(db, eid)) == 7
+
+
+def test_delete_event_clears_pending_notifications(engine):
+    db, _ = engine
+    eid = db.create_event("Launch", _future_date(50), milestones="30,7,0")
+    assert len(_pending_for_event(db, eid)) == 3
+    assert db.delete_event(eid)
+    assert _pending_for_event(db, eid) == []
+    assert db.get_event(eid) is None
+
+
+def test_event_milestone_delivers_through_scheduler(engine):
+    db, N = engine
+    calls = _use_fake_channel(N)
+    eid = db.create_event("Birthday", _future_date(50), milestones="30,7,0")
+    # Force the earliest milestone's due_ts into the past so it's due now.
+    rows = _pending_for_event(db, eid)
+    nid = None
+    with db.get_db() as conn:
+        c = conn.cursor()
+        first = c.execute(
+            "SELECT id FROM notifications WHERE event_id = ? ORDER BY due_ts LIMIT 1", (eid,)
+        ).fetchone()
+        nid = first["id"]
+        c.execute("UPDATE notifications SET due_ts = ? WHERE id = ?",
+                  (int(time.time()) - 100, nid))
+        conn.commit()
+
+    N.send_notifications()
+    assert calls, "a due milestone should be delivered by send_notifications"
+    with db.get_db() as conn:
+        c = conn.cursor()
+        sent = c.execute("SELECT sent FROM notifications WHERE id = ?", (nid,)).fetchone()["sent"]
+    assert sent == 1
+
+
+def test_parse_event_date_accepts_us_and_iso(engine):
+    db, _ = engine
+    from datetime import date
+    assert db._parse_event_date("2026-07-12") == date(2026, 7, 12)
+    assert db._parse_event_date("7/12/26") == date(2026, 7, 12)
+    assert db._parse_event_date("07/12/2026") == date(2026, 7, 12)
+    assert db._parse_event_date("garbage") is None
+
+
+def test_day_of_message_is_celebratory(engine):
+    db, _ = engine
+    msg = db.format_event_message("Sail Away", 0, "2026-07-12", category="cruise")
+    assert "Today is the day" in msg and "🚢" in msg

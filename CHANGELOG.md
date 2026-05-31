@@ -5,7 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [v2.4.0] - 2026-05-30  *(Latest)*
+## [v2.5.0] - 2026-05-31  *(Latest)*
+
+### Added
+
+- Added countdown events (ported and generalised from cruise-notifier). New events table plus an event_id link on notifications; an event (cruise, trip, birthday, deadline) expands into one milestone notification per future day-offset (default 60,30,14,7,3,1,0) delivered by the existing scheduler with no second delivery path. Shared engine (notifier/db.py): create/get/list/update/delete_event, expand_event, _parse_event_date (ISO + US m/d/yy), milestone math, cruise-flavoured messages; seeds cruise-notifier cruises.json on first run (settings-flag guarded, NOTIFIER_SKIP_EVENT_SEED opt-out). Web: /api/events CRUD, dashboard countdown cards, add/edit modal, sidebar Events view. CLI: Events/Countdowns menu (written, pending interactive test). Added 6 engine tests for expansion, past-milestone skipping, re-expand on edit, delete cleanup, and scheduler delivery.
+
+## [v2.4.0] - 2026-05-30
 
 ### Added
 

@@ -92,9 +92,15 @@
                 <h3 class="text-xs font-semibold uppercase tracking-widest text-zinc-500 mb-3 px-2">Configuration</h3>
                 
                 <nav class="space-y-1">
+                    <button onclick="showConfigView('events')"
+                            class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-zinc-800 text-sm font-medium transition-colors">
+                        <i class="fa-solid fa-ship w-4"></i>
+                        <span>Events / Countdowns</span>
+                    </button>
+
                     <button onclick="showConfigView('services')"
                             class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-zinc-800 text-sm font-medium transition-colors">
-                        <i class="fa-solid fa-plug w-4"></i> 
+                        <i class="fa-solid fa-plug w-4"></i>
                         <span>Notification Services</span>
                     </button>
                     
@@ -197,6 +203,66 @@
                             <i class="fa-solid fa-inbox text-3xl mb-3 block text-zinc-700"></i>
                             <p class="font-medium">No reminders yet</p>
                             <p class="text-sm mt-1">Click "Add Reminder" to create your first one.</p>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- Countdown Events -->
+                <div class="bg-zinc-900 border border-zinc-800 rounded-3xl p-8 mb-8">
+                    <div class="flex items-center justify-between mb-6">
+                        <h2 class="text-xl font-semibold flex items-center gap-2">
+                            <i class="fa-solid fa-ship text-sky-400"></i> Countdowns
+                        </h2>
+                        <button onclick="showAddEventModal()"
+                                class="px-4 py-2 text-sm bg-sky-600 hover:bg-sky-500 rounded-2xl font-medium flex items-center gap-2 transition-colors">
+                            <i class="fa-solid fa-plus"></i>
+                            <span>Add Event</span>
+                        </button>
+                    </div>
+                    <div id="events-list">
+                        {% if events %}
+                        <div class="space-y-3">
+                            {% for ev in events %}
+                            <div class="flex items-center justify-between bg-zinc-950 border border-zinc-800 rounded-2xl px-5 py-4">
+                                <div class="flex items-center gap-4 min-w-0">
+                                    <div class="text-2xl">{% if ev.category == 'cruise' %}🚢{% else %}📅{% endif %}</div>
+                                    <div class="min-w-0">
+                                        <div class="text-zinc-100 font-medium break-words">{{ ev.title }}</div>
+                                        <div class="text-sm text-zinc-500 font-mono">{{ ev.target_date }}
+                                            <span class="text-zinc-600">•</span>
+                                            <span class="text-zinc-500">{{ ev.pending_milestones }} upcoming</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-3 ml-2">
+                                    <span class="font-mono text-sm font-semibold
+                                        {% if ev.days_left is none %}text-red-400
+                                        {% elif ev.days_left < 0 %}text-zinc-500
+                                        {% elif ev.days_left == 0 %}text-emerald-400
+                                        {% elif ev.days_left <= 7 %}text-amber-400
+                                        {% else %}text-sky-400{% endif %}">
+                                        {% if ev.days_left is none %}bad date
+                                        {% elif ev.days_left < 0 %}passed
+                                        {% elif ev.days_left == 0 %}TODAY!
+                                        {% elif ev.days_left == 1 %}tomorrow
+                                        {% else %}{{ ev.days_left }} days{% endif %}
+                                    </span>
+                                    <button onclick="editEvent({{ ev.id }})" class="text-zinc-500 hover:text-sky-400 p-2 min-w-[40px] min-h-[40px] flex items-center justify-center">
+                                        <i class="fa-solid fa-edit"></i>
+                                    </button>
+                                    <button onclick="deleteEvent({{ ev.id }})" class="text-zinc-500 hover:text-red-400 p-2 min-w-[40px] min-h-[40px] flex items-center justify-center">
+                                        <i class="fa-solid fa-trash"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <div class="text-center py-12 text-zinc-400 border border-dashed border-zinc-800 rounded-2xl">
+                            <i class="fa-solid fa-ship text-3xl mb-3 block text-zinc-700"></i>
+                            <p class="font-medium">No countdowns yet</p>
+                            <p class="text-sm mt-1">Add a cruise, trip, or any date to be reminded as it approaches.</p>
                         </div>
                         {% endif %}
                     </div>
@@ -473,11 +539,80 @@
         </div>
     </div>
 
+    <!-- Add / Edit Event (Countdown) Modal -->
+    <div id="event-modal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+        <div class="bg-zinc-900 border border-zinc-700 rounded-3xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+            <div class="px-6 py-5 border-b border-zinc-800 flex items-center justify-between">
+                <h3 id="event-modal-title" class="text-lg font-semibold">Add Countdown</h3>
+                <button onclick="hideEventModal()" class="text-zinc-400 hover:text-white text-2xl leading-none">&times;</button>
+            </div>
+
+            <form id="event-form" onsubmit="submitEvent(event)" class="p-6 space-y-5">
+                <div>
+                    <label class="block text-sm text-zinc-400 mb-1.5">Title</label>
+                    <input type="text" name="title" required
+                           class="w-full bg-zinc-950 border border-zinc-800 focus:border-sky-600 rounded-2xl px-4 py-3 text-sm"
+                           placeholder="Carnival Celebration, Japan trip, Mom's birthday...">
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm text-zinc-400 mb-1.5">Target date</label>
+                        <input type="date" name="target_date" id="event-date" required
+                               class="w-full bg-zinc-950 border border-zinc-800 focus:border-sky-600 rounded-2xl px-4 py-3 text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-sm text-zinc-400 mb-1.5">Notify at</label>
+                        <input type="time" name="send_time" id="event-time" value="09:00"
+                               class="w-full bg-zinc-950 border border-zinc-800 focus:border-sky-600 rounded-2xl px-4 py-3 text-sm">
+                    </div>
+                </div>
+
+                <div>
+                    <label class="inline-flex items-center gap-2 text-sm text-zinc-400">
+                        <input type="checkbox" name="is_cruise" id="event-cruise" class="accent-sky-600 w-4 h-4">
+                        This is a cruise 🚢
+                    </label>
+                </div>
+
+                <div>
+                    <label class="block text-sm text-zinc-400 mb-1.5">Details <span class="text-zinc-600">(optional)</span></label>
+                    <input type="text" name="details" id="event-details"
+                           class="w-full bg-zinc-950 border border-zinc-800 focus:border-sky-600 rounded-2xl px-4 py-3 text-sm"
+                           placeholder="Ship, cabin, confirmation #...">
+                </div>
+
+                <div>
+                    <label class="block text-sm text-zinc-400 mb-1.5">Milestones <span class="text-zinc-600">(days before, comma-separated)</span></label>
+                    <input type="text" name="milestones" id="event-milestones" value="60,30,14,7,3,1,0"
+                           class="w-full bg-zinc-950 border border-zinc-800 focus:border-sky-600 rounded-2xl px-4 py-3 text-sm font-mono">
+                    <p class="text-xs text-zinc-500 mt-1">You'll get a notification on each of these days before the date (0 = the day itself).</p>
+                </div>
+
+                <div class="flex gap-3 pt-2">
+                    <button type="button" onclick="hideEventModal()"
+                            class="flex-1 px-4 py-3 rounded-2xl bg-zinc-800 hover:bg-zinc-700 text-sm font-medium transition-colors">
+                        Cancel
+                    </button>
+                    <button type="submit" id="event-submit-btn"
+                            class="flex-1 px-4 py-3 rounded-2xl bg-sky-600 hover:bg-sky-500 text-sm font-semibold transition-colors">
+                        Add Countdown
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <script>
         // Reminder data (keyed by id) for prefilling the edit form — no extra API call.
         window.REMINDERS = Object.fromEntries(
             ({{ reminders | tojson }}).map(r => [r.id, r])
         );
+        // Event data (keyed by id) for prefilling the edit form.
+        window.EVENTS = Object.fromEntries(
+            ({{ events | tojson }}).map(e => [e.id, e])
+        );
+        let editingEventId = null;   // null = add mode, otherwise the event id being edited
         let editingId = null;   // null = add mode, otherwise the reminder id being edited
         let duePicker = null;   // the flatpickr instance on #due-input
 
@@ -572,6 +707,87 @@
             // due_time is stored as "YYYY-MM-DD HH:MM", matching the picker's dateFormat.
             if (duePicker) duePicker.setDate(r.due_time, true, 'Y-m-d H:i');
             openModal();
+        }
+
+        // === Countdown Events ===
+
+        function showAddEventModal() {
+            editingEventId = null;
+            const form = document.getElementById('event-form');
+            form.reset();
+            document.getElementById('event-milestones').value = '60,30,14,7,3,1,0';
+            document.getElementById('event-time').value = '09:00';
+            document.getElementById('event-modal-title').textContent = 'Add Countdown';
+            document.getElementById('event-submit-btn').textContent = 'Add Countdown';
+            const modal = document.getElementById('event-modal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function hideEventModal() {
+            const modal = document.getElementById('event-modal');
+            modal.classList.remove('flex');
+            modal.classList.add('hidden');
+            editingEventId = null;
+        }
+
+        function editEvent(id) {
+            const ev = window.EVENTS[id];
+            if (!ev) { alert('Event not found — try refreshing.'); return; }
+            editingEventId = id;
+            const form = document.getElementById('event-form');
+            form.reset();
+            form.querySelector('[name="title"]').value = ev.title || '';
+            // target_date is stored as YYYY-MM-DD, which matches <input type="date">
+            document.getElementById('event-date').value = ev.target_date || '';
+            document.getElementById('event-time').value = ev.send_time || '09:00';
+            document.getElementById('event-cruise').checked = (ev.category === 'cruise');
+            document.getElementById('event-details').value = ev.details || '';
+            document.getElementById('event-milestones').value = ev.milestones || '60,30,14,7,3,1,0';
+            document.getElementById('event-modal-title').textContent = 'Edit Countdown';
+            document.getElementById('event-submit-btn').textContent = 'Save Changes';
+            const modal = document.getElementById('event-modal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        async function submitEvent(e) {
+            e.preventDefault();
+            const form = e.target;
+            const formData = new FormData(form);
+            // Translate the checkbox into the category the backend expects.
+            formData.set('category', document.getElementById('event-cruise').checked ? 'cruise' : '');
+            formData.delete('is_cruise');
+
+            const url = editingEventId ? `/api/events/${editingEventId}` : '/api/events';
+            const method = editingEventId ? 'PUT' : 'POST';
+
+            try {
+                const res = await fetch(url, { method, body: formData });
+                const data = await res.json();
+                if (res.ok && data.success) {
+                    hideEventModal();
+                    window.location.reload();
+                } else {
+                    alert(data.error || 'Failed to save event');
+                }
+            } catch (err) {
+                alert('Network error while saving event');
+            }
+        }
+
+        async function deleteEvent(id) {
+            if (!confirm('Delete this countdown? Its upcoming notifications will be removed.')) return;
+            try {
+                const res = await fetch(`/api/events/${id}`, { method: 'DELETE' });
+                if (res.ok) {
+                    window.location.reload();
+                } else {
+                    alert('Failed to delete event');
+                }
+            } catch (err) {
+                alert('Error deleting event');
+            }
         }
 
         async function loadLogs() {
@@ -998,7 +1214,12 @@
             const timeView = document.getElementById('view-time');
             if (timeView) timeView.classList.add('hidden');
 
-            if (type === 'services') {
+            if (type === 'events') {
+                // Countdowns live on the main dashboard — show it and scroll to them.
+                document.getElementById('view-main').classList.remove('hidden');
+                const list = document.getElementById('events-list');
+                if (list) list.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            } else if (type === 'services') {
                 document.getElementById('view-services').classList.remove('hidden');
             } else if (type === 'heartbeat') {
                 document.getElementById('view-heartbeat').classList.remove('hidden');

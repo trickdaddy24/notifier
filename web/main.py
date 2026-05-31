@@ -59,7 +59,9 @@ TEMPLATES_DIR = BASE_DIR / "templates"
 try:
     from notifier.db import (
     get_db, init_db, DB_PATH, get_setting, set_setting,
-    _to_ts, _now_in_tz, _tz_label, get_time_mode, set_time_mode, to_epoch
+    _to_ts, _now_in_tz, _tz_label, get_time_mode, set_time_mode, to_epoch,
+    create_event, list_events, get_event, update_event, delete_event,
+    days_until, _parse_event_date, DEFAULT_MILESTONES, DEFAULT_EVENT_SEND_TIME
 )
 except ImportError:
     # Fallback for when running web/ in isolation (development)
@@ -67,7 +69,9 @@ except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     from notifier.db import (
     get_db, init_db, DB_PATH, get_setting, set_setting,
-    _to_ts, _now_in_tz, _tz_label, get_time_mode, set_time_mode, to_epoch
+    _to_ts, _now_in_tz, _tz_label, get_time_mode, set_time_mode, to_epoch,
+    create_event, list_events, get_event, update_event, delete_event,
+    days_until, _parse_event_date, DEFAULT_MILESTONES, DEFAULT_EVENT_SEND_TIME
 )
 
 
@@ -250,6 +254,7 @@ async def root(
 
     reminders = get_upcoming_reminders()
     version = get_app_version()
+    events = list_events()
 
     html = render_template(
         "dashboard.html",
@@ -258,6 +263,8 @@ async def root(
             "auth_enabled": is_auth_enabled(),
             "reminders": reminders,
             "reminder_count": len(reminders),
+            "events": events,
+            "event_count": len(events),
             "version": version,
         },
     )
@@ -750,6 +757,99 @@ async def test_heartbeat(user: Optional[str] = Depends(get_current_user)):
     except Exception as e:
         logger.exception("Heartbeat test failed")
         return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+# ── Countdown Events API (cruises, trips, birthdays, deadlines) ──────────────
+
+@app.get("/api/events")
+async def api_list_events(user: Optional[str] = Depends(get_current_user)):
+    if user is None:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        return {"events": list_events()}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/events")
+async def api_create_event(
+    title: str = Form(...),
+    target_date: str = Form(...),
+    category: str = Form(""),
+    details: str = Form(""),
+    milestones: str = Form(""),
+    send_time: str = Form(""),
+    user: Optional[str] = Depends(get_current_user),
+):
+    if user is None:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    if not title.strip():
+        return JSONResponse({"error": "Title is required"}, status_code=400)
+    if _parse_event_date(target_date) is None:
+        return JSONResponse({"error": "Invalid date. Use YYYY-MM-DD or m/d/yy."}, status_code=400)
+
+    try:
+        event_id = create_event(
+            title, target_date,
+            category=(category or None),
+            details=(details or None),
+            milestones=(milestones or DEFAULT_MILESTONES),
+            send_time=(send_time or DEFAULT_EVENT_SEND_TIME),
+        )
+        if event_id is None:
+            return JSONResponse({"error": "Could not create event"}, status_code=400)
+        ev = list_events()
+        pending = next((e["pending_milestones"] for e in ev if e["id"] == event_id), 0)
+        logger.info("User '%s' created event #%s (%s)", user, event_id, title)
+        return {"success": True, "id": event_id, "pending_milestones": pending}
+    except Exception as e:
+        return JSONResponse({"error": f"Database error: {str(e)}"}, status_code=500)
+
+
+@app.put("/api/events/{event_id}")
+async def api_update_event(
+    event_id: int,
+    title: str = Form(...),
+    target_date: str = Form(...),
+    category: str = Form(""),
+    details: str = Form(""),
+    milestones: str = Form(""),
+    send_time: str = Form(""),
+    user: Optional[str] = Depends(get_current_user),
+):
+    if user is None:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    if not title.strip():
+        return JSONResponse({"error": "Title is required"}, status_code=400)
+    if _parse_event_date(target_date) is None:
+        return JSONResponse({"error": "Invalid date. Use YYYY-MM-DD or m/d/yy."}, status_code=400)
+
+    try:
+        ok = update_event(
+            event_id, title=title, target_date=target_date,
+            category=(category or None), details=(details or None),
+            milestones=(milestones or DEFAULT_MILESTONES),
+            send_time=(send_time or DEFAULT_EVENT_SEND_TIME),
+        )
+        if not ok:
+            return JSONResponse({"error": "Event not found or invalid"}, status_code=404)
+        logger.info("User '%s' updated event #%s", user, event_id)
+        return {"success": True}
+    except Exception as e:
+        return JSONResponse({"error": f"Database error: {str(e)}"}, status_code=500)
+
+
+@app.delete("/api/events/{event_id}")
+async def api_delete_event(event_id: int, user: Optional[str] = Depends(get_current_user)):
+    if user is None:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        if delete_event(event_id):
+            logger.info("User '%s' deleted event #%s", user, event_id)
+            return {"success": True}
+        return JSONResponse({"error": "Event not found"}, status_code=404)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 # ── Notification Channels Management API ─────────────────────────────────────

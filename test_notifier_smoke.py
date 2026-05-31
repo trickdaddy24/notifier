@@ -19,6 +19,7 @@ from zoneinfo import ZoneInfo
 # env-driven helpers see them.
 os.environ["TIMEZONE"] = "America/Chicago"
 os.environ.setdefault("NOTIFIER_DB_PATH", os.path.join(os.path.dirname(__file__), ".smoke_test.db"))
+os.environ["NOTIFIER_SKIP_EVENT_SEED"] = "1"
 
 from notifier import db as D            # noqa: E402
 from notifier import notifications as N  # noqa: E402
