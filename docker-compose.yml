@@ -1,12 +1,16 @@
-version: '3.8'
-
 services:
   notifier-web:
     build: .
     container_name: notifier-web
     restart: unless-stopped
-    ports:
-      - "8000:8000"
+    # Fronted by Traefik (Saltbox) on the external `saltbox` network — no host
+    # port is published. For standalone/local use WITHOUT Traefik, add
+    #   ports:
+    #     - "8000:8000"
+    # back to this service and remove the `saltbox` network below.
+    networks:
+      - saltbox
+      - default
     environment:
       - NOTIFIER_WEB_PASSWORD=${NOTIFIER_WEB_PASSWORD}
       - TIMEZONE=${TIMEZONE:-America/New_York}
@@ -31,18 +35,8 @@ services:
       retries: 3
       start_period: 10s
 
-  # Optional: Add Caddy for reverse proxy + automatic HTTPS later
-  # caddy:
-  #   image: caddy:2
-  #   restart: unless-stopped
-  #   ports:
-  #     - "80:80"
-  #     - "443:443"
-  #   volumes:
-  #     - ./Caddyfile:/etc/caddy/Caddyfile
-  #     - caddy_data:/data
-  #     - caddy_config:/config
-
-volumes:
-  caddy_data:
-  caddy_config:
+networks:
+  # Traefik's network on the Saltbox host. Must already exist
+  # (`docker network create saltbox` is managed by Saltbox).
+  saltbox:
+    external: true
