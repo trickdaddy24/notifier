@@ -23,7 +23,9 @@ services:
       - ./data:/app/data
       - ./.env:/app/.env:ro
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      # python:3.11-slim has no curl — use the bundled Python instead.
+      # urlopen raises (non-zero exit) if the app is unreachable.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5)"]
       interval: 30s
       timeout: 10s
       retries: 3

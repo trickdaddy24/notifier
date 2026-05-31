@@ -13,3 +13,7 @@ APScheduler>=3.10.0
 
 # HTTP client (used by shared notification senders: Telegram, Discord, etc.)
 requests>=2.31.0
+
+# IANA timezone database — python:3.11-slim ships none, so ZoneInfo() (used by
+# the shared db.py for the TIMEZONE setting) would otherwise fail in the container.
+tzdata>=2024.1
