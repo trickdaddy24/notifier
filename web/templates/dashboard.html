@@ -482,8 +482,12 @@
             if (input) {
                 const now = new Date();
                 now.setHours(now.getHours() + 1);
-                const iso = now.toISOString().slice(0, 16); // YYYY-MM-DDTHH:MM
-                input.value = iso;
+                // datetime-local expects LOCAL wall-clock time; toISOString()
+                // returns UTC, which made the default appear hours off. Build
+                // the YYYY-MM-DDTHH:MM string from local getters instead.
+                const pad = (n) => String(n).padStart(2, '0');
+                input.value = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+                            + `T${pad(now.getHours())}:${pad(now.getMinutes())}`;
             }
         }
 
