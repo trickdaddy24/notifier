@@ -1,0 +1,15 @@
+# Web UI dependencies (install with: pip install -r web/requirements.txt)
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+python-multipart>=0.0.6
+bcrypt>=4.1.2
+itsdangerous>=2.1.2
+
+# For future rich UI
+jinja2>=3.1.3
+
+# Scheduler (APScheduler is much better for web apps than the old 'schedule' library)
+APScheduler>=3.10.0
+
+# HTTP client (used by shared notification senders: Telegram, Discord, etc.)
+requests>=2.31.0

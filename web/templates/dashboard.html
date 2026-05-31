@@ -1,0 +1,1233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard • Notifier</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        body { font-family: 'Inter', system_ui, sans-serif; }
+        .font-display { font-family: 'Space Grotesk', 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="bg-zinc-950 text-zinc-200">
+    <!-- Top Navigation -->
+    <nav class="border-b border-zinc-800 bg-zinc-900/70 backdrop-blur-lg sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+            <div class="flex items-center gap-3 cursor-pointer" onclick="showView('main')" title="Return to Home / Dashboard">
+                <div class="w-9 h-9 bg-emerald-600 rounded-2xl flex items-center justify-center">
+                    <i class="fa-solid fa-bell text-white"></i>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span class="font-display text-xl font-semibold tracking-tight">Notifier</span>
+                    <!-- Current Version Badge (always visible in top nav) -->
+                    <span id="app-version-badge"
+                          class="text-[10px] font-mono px-2 py-0.5 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-400">
+                        {% if version %}v{{ version }}{% else %}v2.2.0{% endif %}
+                    </span>
+                </div>
+            </div>
+
+            <!-- TEMPORARY DEBUG MARKER - REMOVE AFTER YOU SEE IT -->
+            <div class="bg-red-600 text-white text-center text-xs py-1 font-bold tracking-wider">
+                NEW BUILD 28 MAY 2026 — Time Sync + Version Badge + Top Nav Button Added
+            </div>
+
+            <div class="flex items-center gap-4">
+                <!-- Live Date & Time - ALWAYS VISIBLE with strong page colors -->
+                <div id="top-nav-datetime" 
+                     class="flex items-center gap-2 font-mono text-sm px-4 py-1.5 bg-emerald-950 border-2 border-emerald-600/80 rounded-2xl text-emerald-200 shadow-inner">
+                    <i class="fa-regular fa-clock text-emerald-400"></i>
+                    <span id="top-nav-datetime-text" class="font-bold tracking-tighter"></span>
+                </div>
+
+                <!-- Colorful Action Buttons in Top Nav -->
+                <button onclick="showAddModal()"
+                        class="flex items-center gap-2 px-4 py-1.5 text-sm font-semibold rounded-2xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 transition-all text-white shadow-sm">
+                    <i class="fa-solid fa-plus"></i>
+                    <span class="hidden sm:inline">Add Reminder</span>
+                </button>
+
+                <button onclick="testTelegram()"
+                        class="flex items-center gap-2 px-3 py-1.5 text-sm rounded-2xl bg-sky-600 hover:bg-sky-500 active:bg-sky-700 transition-all text-white">
+                    <i class="fa-brands fa-telegram"></i>
+                    <span class="hidden md:inline">Test</span>
+                </button>
+
+                <!-- Quick access to Time Settings (visible even if sidebar is hidden) -->
+                <button onclick="showConfigView('time')"
+                        class="flex items-center gap-2 px-3 py-1.5 text-sm rounded-2xl bg-violet-600 hover:bg-violet-500 active:bg-violet-700 transition-all text-white"
+                        title="Time & Date Sync (NTP vs Local PC)">
+                    <i class="fa-solid fa-clock"></i>
+                    <span class="hidden md:inline">Time Sync</span>
+                </button>
+
+                <div class="flex items-center gap-2 text-sm text-zinc-400 pl-2 border-l border-zinc-800">
+                    <i class="fa-solid fa-user-circle"></i>
+                    <span class="hidden sm:inline">{{ user }}</span>
+                </div>
+
+                <form action="/logout" method="post">
+                    <button type="submit"
+                            class="flex items-center gap-2 px-3 py-1.5 text-sm rounded-2xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white transition-colors">
+                        <i class="fa-solid fa-sign-out-alt"></i>
+                        <span class="hidden md:inline">Sign out</span>
+                    </button>
+                </form>
+            </div>
+        </div>
+    </nav>
+
+    <div class="flex max-w-7xl mx-auto">
+        <!-- Left Sidebar - Navigation to config "pages" -->
+        <div class="w-64 bg-zinc-900 border-r border-zinc-800 min-h-screen p-4 hidden lg:block">
+            <div class="sticky top-4">
+                <!-- Home button at top of sidebar - PRIMARY way to return to main screen -->
+                <button onclick="showView('main')"
+                        class="w-full mb-4 flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-sm font-bold transition-all shadow-sm">
+                    <i class="fa-solid fa-home"></i> 
+                    <span>HOME</span>
+                </button>
+
+                <h3 class="text-xs font-semibold uppercase tracking-widest text-zinc-500 mb-3 px-2">Configuration</h3>
+                
+                <nav class="space-y-1">
+                    <button onclick="showConfigView('services')"
+                            class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-zinc-800 text-sm font-medium transition-colors">
+                        <i class="fa-solid fa-plug w-4"></i> 
+                        <span>Notification Services</span>
+                    </button>
+                    
+                    <button onclick="showConfigView('heartbeat')"
+                            class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-zinc-800 text-sm font-medium transition-colors">
+                        <i class="fa-solid fa-heartbeat w-4"></i> 
+                        <span>Heartbeat Settings</span>
+                    </button>
+
+                    <button onclick="showConfigView('time')"
+                            class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-zinc-800 text-sm font-medium transition-colors">
+                        <i class="fa-solid fa-clock w-4"></i> 
+                        <span>Time &amp; Date</span>
+                    </button>
+                </nav>
+            </div>
+        </div>
+
+        <!-- Main Content Area -->
+        <div class="flex-1 px-6 py-8 max-w-5xl">
+
+            <!-- Main Dashboard View -->
+            <div id="view-main">
+                <!-- Header -->
+                <div class="flex items-end justify-between mb-8">
+                    <div>
+                        <h1 class="text-4xl font-display tracking-tighter font-semibold">Dashboard</h1>
+                        <p class="text-zinc-400 mt-1">Your notification scheduler</p>
+                    </div>
+                    
+                    <div class="flex items-center gap-3">
+                        <div class="px-4 py-2 bg-zinc-900 border border-zinc-800 rounded-2xl text-sm flex items-center gap-2">
+                            <div class="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
+                            <span class="text-emerald-400 font-medium">Running</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Stats -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+                    <div class="bg-zinc-900 border border-zinc-800 rounded-3xl p-5">
+                        <div class="text-zinc-400 text-sm">Pending Reminders</div>
+                        <div class="text-4xl font-semibold mt-2 tracking-tighter" id="pending-count">{{ reminder_count }}</div>
+                    </div>
+                    <div class="bg-zinc-900 border border-zinc-800 rounded-3xl p-5">
+                        <div class="text-zinc-400 text-sm">Sent Today</div>
+                        <div class="text-4xl font-semibold mt-2 tracking-tighter" id="sent-today-count">—</div>
+                    </div>
+                    <div class="bg-zinc-900 border border-zinc-800 rounded-3xl p-5">
+                        <div class="text-zinc-400 text-sm">Active Channels</div>
+                        <div class="text-4xl font-semibold mt-2 tracking-tighter" id="active-channels-count">—</div>
+                    </div>
+                </div>
+
+                <!-- Upcoming Reminders -->
+                <div class="bg-zinc-900 border border-zinc-800 rounded-3xl p-8 mb-8">
+                    <div class="flex items-center justify-between mb-6">
+                        <h2 class="text-xl font-semibold">Upcoming Reminders</h2>
+                        <button onclick="showAddModal()"
+                                class="px-4 py-2 text-sm bg-emerald-600 hover:bg-emerald-500 rounded-2xl font-medium flex items-center gap-2 transition-colors">
+                            <i class="fa-solid fa-plus"></i>
+                            <span>Add Reminder</span>
+                        </button>
+                    </div>
+
+                    <div id="reminders-list">
+                        {% if reminders %}
+                        <div class="space-y-3">
+                            {% for r in reminders %}
+                            <div class="flex items-start justify-between bg-zinc-950 border border-zinc-800 rounded-2xl px-5 py-4">
+                                <div class="flex-1 min-w-0">
+                                    <div class="text-zinc-100 font-medium break-words">{{ r.message }}</div>
+                                    <div class="mt-1 flex items-center gap-3 text-sm">
+                                        <span class="text-emerald-400 font-mono">{{ r.due_time }}</span>
+                                        {% if r.recurrence %}
+                                        <span class="inline-flex items-center px-2 py-0.5 rounded-lg bg-zinc-900 text-xs text-zinc-400">
+                                            <i class="fa-solid fa-redo mr-1"></i> {{ r.recurrence }}
+                                        </span>
+                                        {% endif %}
+                                        {% if r.is_overdue %}
+                                        <span class="text-red-400 text-xs">Overdue</span>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                                <div class="flex gap-1 ml-4">
+                                    <button onclick="editReminder({{ r.id }})"
+                                            class="text-zinc-500 hover:text-emerald-400 p-2">
+                                        <i class="fa-solid fa-edit"></i>
+                                    </button>
+                                    <button onclick="deleteReminder({{ r.id }}, this)"
+                                            class="text-zinc-500 hover:text-red-400 p-2">
+                                        <i class="fa-solid fa-trash"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <div class="text-center py-12 text-zinc-400 border border-dashed border-zinc-800 rounded-2xl">
+                            <i class="fa-solid fa-inbox text-3xl mb-3 block text-zinc-700"></i>
+                            <p class="font-medium">No reminders yet</p>
+                            <p class="text-sm mt-1">Click "Add Reminder" to create your first one.</p>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- Recent Activity -->
+                <div>
+                    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
+                        <h2 class="text-xl font-semibold">Recent Activity</h2>
+                        
+                        <div class="flex flex-wrap gap-3 items-center">
+                            <select id="log-filter-channel" onchange="loadLogs()" 
+                                    class="bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-1.5 text-sm">
+                                <option value="">All Channels</option>
+                                <option value="telegram">Telegram</option>
+                                <option value="discord">Discord</option>
+                            </select>
+
+                            <select id="log-filter-status" onchange="loadLogs()" 
+                                    class="bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-1.5 text-sm">
+                                <option value="">All Statuses</option>
+                                <option value="SUCCESS">Success</option>
+                                <option value="FAILED">Failed</option>
+                                <option value="SKIPPED">Skipped</option>
+                            </select>
+
+                            <button onclick="loadLogs()" 
+                                    class="px-4 py-1.5 text-sm bg-zinc-700 hover:bg-zinc-600 rounded-xl flex items-center gap-2 transition-colors">
+                                <i class="fa-solid fa-sync"></i>
+                                <span>Refresh</span>
+                            </button>
+
+                            <button onclick="clearAllLogs()" 
+                                    class="px-4 py-1.5 text-sm bg-red-700 hover:bg-red-600 rounded-xl flex items-center gap-2 transition-colors">
+                                <i class="fa-solid fa-trash"></i>
+                                <span>Clear All</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="logs-container" class="bg-zinc-900 border border-zinc-800 rounded-3xl p-6 text-sm">
+                        <div class="text-zinc-400">Loading recent activity...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Services View -->
+            <div id="view-services" class="hidden">
+                <h1 class="text-3xl font-semibold mb-6">Notification Services</h1>
+                <div id="channels-list" class="space-y-4">
+                    <!-- Populated by JS -->
+                </div>
+            </div>
+
+            <!-- Heartbeat View -->
+            <div id="view-heartbeat" class="hidden">
+                <h1 class="text-3xl font-semibold mb-6">Heartbeat Settings</h1>
+                <div class="bg-zinc-900 border border-zinc-800 rounded-3xl p-8 max-w-2xl">
+                    <!-- Heartbeat form content -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <label class="block text-sm text-zinc-400 mb-2">Interval (hours)</label>
+                            <div class="flex gap-3">
+                                <input type="number" id="heartbeat-interval" value="6" min="0"
+                                       class="w-24 bg-zinc-950 border border-zinc-800 focus:border-emerald-600 rounded-2xl px-4 py-2 text-base">
+                                <button onclick="saveHeartbeatSettings()"
+                                        class="px-6 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-2xl text-sm font-medium transition-colors">
+                                    Save
+                                </button>
+                            </div>
+                            <p class="text-xs text-zinc-500 mt-1">Set to 0 to disable heartbeat</p>
+                        </div>
+
+                        <div>
+                            <label class="block text-sm text-zinc-400 mb-2">File Location</label>
+                            <div class="flex gap-3">
+                                <input type="text" id="heartbeat-file-location" 
+                                       class="flex-1 bg-zinc-950 border border-zinc-800 focus:border-emerald-600 rounded-2xl px-4 py-2 text-base">
+                                <button onclick="saveHeartbeatSettings()"
+                                        class="px-6 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-2xl text-sm font-medium transition-colors">
+                                    Save
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mt-6 pt-6 border-t border-zinc-800">
+                        <button onclick="testHeartbeat()"
+                                class="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 rounded-2xl text-sm font-medium flex items-center gap-2 transition-colors">
+                            <i class="fa-solid fa-heartbeat"></i>
+                            <span>Test Heartbeat</span>
+                        </button>
+                        <span id="heartbeat-status" class="text-sm text-zinc-400 ml-4"></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Time & Date Sync View -->
+            <div id="view-time" class="hidden">
+                <h1 class="text-3xl font-semibold mb-2">Time &amp; Date Sync</h1>
+                <p class="text-zinc-400 mb-8">Choose how reminder times you enter are interpreted.</p>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 max-w-5xl">
+                    <!-- Server / NTP Mode -->
+                    <div onclick="selectTimeMode('server')"
+                         class="time-mode-card cursor-pointer border-2 border-emerald-600 bg-zinc-900 rounded-3xl p-6 transition-all"
+                         id="mode-card-server">
+                        <div class="flex items-start gap-4">
+                            <div class="w-12 h-12 rounded-2xl bg-emerald-600/20 flex items-center justify-center flex-shrink-0">
+                                <i class="fa-solid fa-server text-emerald-400 text-2xl"></i>
+                            </div>
+                            <div class="flex-1">
+                                <div class="flex items-center gap-2">
+                                    <div class="font-semibold text-lg">NTP / Server Time</div>
+                                    <span class="text-[10px] px-2 py-0.5 rounded-full bg-emerald-600 text-white font-medium">RECOMMENDED</span>
+                                </div>
+                                <div class="text-sm text-emerald-300 mt-1">Uses your server's configured timezone</div>
+
+                                <div class="mt-4 text-sm space-y-1 text-zinc-300">
+                                    <div><span class="text-zinc-500">Server timezone:</span> <span id="server-tz-label" class="font-mono text-emerald-400"></span></div>
+                                    <div><span class="text-zinc-500">Server now:</span> <span id="server-time-now" class="font-mono"></span></div>
+                                </div>
+
+                                <div class="mt-4 text-xs text-zinc-400 leading-snug">
+                                    The server clock is kept accurate via NTP (standard on Linux servers).
+                                    All reminders fire based on this time.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Local PC / Browser Mode -->
+                    <div onclick="selectTimeMode('local')"
+                         class="time-mode-card cursor-pointer border-2 border-zinc-700 hover:border-sky-500 bg-zinc-900 rounded-3xl p-6 transition-all"
+                         id="mode-card-local">
+                        <div class="flex items-start gap-4">
+                            <div class="w-12 h-12 rounded-2xl bg-sky-600/20 flex items-center justify-center flex-shrink-0">
+                                <i class="fa-solid fa-laptop text-sky-400 text-2xl"></i>
+                            </div>
+                            <div class="flex-1">
+                                <div class="font-semibold text-lg">My Local PC</div>
+                                <div class="text-sm text-sky-300 mt-1">Use the date &amp; time from this browser</div>
+
+                                <div class="mt-4 text-sm space-y-1 text-zinc-300">
+                                    <div><span class="text-zinc-500">Your timezone:</span> <span id="browser-tz-label" class="font-mono text-sky-400"></span></div>
+                                    <div><span class="text-zinc-500">Your PC now:</span> <span id="browser-time-now" class="font-mono"></span></div>
+                                </div>
+
+                                <div class="mt-4 text-xs text-zinc-400 leading-snug">
+                                    When you pick a time in the reminder form, it will mean "that wall time on my computer".
+                                    Useful when your PC timezone differs from the server.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Comparison + Save -->
+                <div class="mt-8 max-w-5xl">
+                    <div class="bg-zinc-900 border border-zinc-800 rounded-3xl p-6">
+                        <div class="flex flex-wrap items-center justify-between gap-4">
+                            <div>
+                                <div class="text-sm text-zinc-400">Current difference</div>
+                                <div id="time-diff" class="font-mono text-xl font-semibold text-amber-400">—</div>
+                            </div>
+
+                            <button onclick="saveTimeMode()"
+                                    class="px-8 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 font-semibold text-sm transition-colors flex items-center gap-2">
+                                <i class="fa-solid fa-save"></i>
+                                <span>Save Time Preference</span>
+                            </button>
+                        </div>
+
+                        <div class="mt-4 pt-4 border-t border-zinc-800 text-xs text-zinc-500">
+                            This setting only affects <strong>new reminders</strong> you create (and edits).
+                            Existing reminders keep the time they were originally saved with.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Footer note inside main column -->
+            <div class="mt-6 text-xs text-center text-zinc-500">
+                Auth is {% if auth_enabled %}enabled{% else %}disabled (dev mode){% endif %}. 
+                Logged in as <span class="font-mono">{{ user }}</span>.
+                <span class="mx-2 text-zinc-700">•</span>
+                v{% if version %}{{ version }}{% else %}2.2.0{% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Channel Configuration Modal -->
+    <div id="channel-modal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+        <div class="bg-zinc-900 border border-zinc-700 rounded-3xl w-full max-w-md mx-4 overflow-hidden">
+            <div class="px-6 py-5 border-b border-zinc-800 flex items-center justify-between">
+                <h3 class="text-lg font-semibold" id="channel-modal-title">Configure Channel</h3>
+                <button onclick="hideChannelModal()" class="text-zinc-400 hover:text-white text-2xl leading-none">&times;</button>
+            </div>
+
+            <div class="p-6">
+                <form id="channel-form" onsubmit="submitChannelConfig(event)">
+                    <div id="channel-fields" class="space-y-4 mb-6">
+                        <!-- Dynamic fields will be injected here -->
+                    </div>
+
+                    <div class="flex gap-3">
+                        <button type="button" onclick="clearChannelCredentials()"
+                                class="flex-1 px-4 py-2.5 rounded-2xl bg-red-600 hover:bg-red-500 text-sm font-medium transition-colors">
+                            Clear Credentials
+                        </button>
+                        <button type="submit"
+                                class="flex-1 px-4 py-2.5 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-sm font-semibold transition-colors">
+                            Save
+                        </button>
+                    </div>
+                </form>
+
+                <div class="mt-4 pt-4 border-t border-zinc-800">
+                    <button onclick="testCurrentChannel()"
+                            class="w-full px-4 py-2.5 rounded-2xl bg-blue-600 hover:bg-blue-500 text-sm font-medium transition-colors flex items-center justify-center gap-2">
+                        <i class="fa-solid fa-paper-plane"></i>
+                        <span>Send Test Message</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Reminder Modal -->
+    <div id="add-modal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+        <div class="bg-zinc-900 border border-zinc-700 rounded-3xl w-full max-w-lg mx-4 overflow-hidden">
+            <div class="px-6 py-5 border-b border-zinc-800 flex items-center justify-between">
+                <h3 class="text-lg font-semibold">Add New Reminder</h3>
+                <button onclick="hideAddModal()" class="text-zinc-400 hover:text-white text-2xl leading-none">&times;</button>
+            </div>
+
+            <form id="add-reminder-form" onsubmit="submitReminder(event)" class="p-6 space-y-5">
+                <input type="hidden" name="id" id="reminder-id">
+                <div>
+                    <label class="block text-sm text-zinc-400 mb-1.5">Message</label>
+                    <textarea name="message" required rows="3"
+                              class="w-full bg-zinc-950 border border-zinc-800 focus:border-emerald-600 rounded-2xl px-4 py-3 text-sm resize-y"
+                              placeholder="Take out the trash, pay rent, call mom..."></textarea>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm text-zinc-400 mb-1.5">Due Date &amp; Time</label>
+                        <input type="datetime-local" name="due" required
+                               class="w-full bg-zinc-950 border border-zinc-800 focus:border-emerald-600 rounded-2xl px-4 py-3 text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-sm text-zinc-400 mb-1.5">Repeat</label>
+                        <select name="recurrence" class="w-full bg-zinc-950 border border-zinc-800 focus:border-emerald-600 rounded-2xl px-4 py-3 text-sm">
+                            <option value="">One time only</option>
+                            <option value="daily">Daily</option>
+                            <option value="weekly">Weekly</option>
+                            <option value="monthly">Monthly</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="flex gap-3 pt-2">
+                    <button type="button" onclick="hideAddModal()"
+                            class="flex-1 px-4 py-3 rounded-2xl bg-zinc-800 hover:bg-zinc-700 text-sm font-medium transition-colors">
+                        Cancel
+                    </button>
+                    <button type="submit"
+                            class="flex-1 px-4 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-sm font-semibold transition-colors">
+                        Add Reminder
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        function showAddModal() {
+            const modal = document.getElementById('add-modal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+
+            // Set default due time to 1 hour from now
+            const input = document.querySelector('#add-reminder-form input[name="due"]');
+            if (input) {
+                const now = new Date();
+                now.setHours(now.getHours() + 1);
+                const iso = now.toISOString().slice(0, 16); // YYYY-MM-DDTHH:MM
+                input.value = iso;
+            }
+        }
+
+        function hideAddModal() {
+            const modal = document.getElementById('add-modal');
+            modal.classList.remove('flex');
+            modal.classList.add('hidden');
+            document.getElementById('add-reminder-form').reset();
+        }
+
+        async function submitReminder(e) {
+            e.preventDefault();
+            const form = e.target;
+            const formData = new FormData(form);
+
+            // Always send the browser's IANA timezone so the backend can honor "Local PC" mode
+            const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+            if (browserTz) formData.append('browser_tz', browserTz);
+
+            try {
+                const res = await fetch('/api/reminders', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await res.json();
+
+                if (res.ok && data.success) {
+                    hideAddModal();
+                    // Reload the page so the new reminder appears in the list
+                    window.location.reload();
+                } else {
+                    alert(data.error || 'Failed to add reminder');
+                }
+            } catch (err) {
+                alert('Network error while adding reminder');
+            }
+        }
+
+        async function deleteReminder(id, btn) {
+            if (!confirm('Delete this reminder?')) return;
+
+            try {
+                const res = await fetch(`/api/reminders/${id}`, { method: 'DELETE' });
+                if (res.ok) {
+                    window.location.reload();
+                } else {
+                    alert('Failed to delete reminder');
+                }
+            } catch (err) {
+                alert('Error deleting reminder');
+            }
+        }
+
+        async function editReminder(id) {
+            try {
+                const res = await fetch(`/api/reminders/${id}`);  // Note: we don't have GET single yet, using reload for simplicity or we can enhance later
+                // For now, simple approach: reload page and use browser to remember, but better to fetch properly.
+                // Quick implementation: open add modal prefilled via separate call if needed.
+                // For this iteration, we'll use a simple prompt-based edit for speed.
+                const currentMsg = prompt("New message:");
+                if (!currentMsg) return;
+
+                const newDue = prompt("New due (YYYY-MM-DD HH:MM):");
+                if (!newDue) return;
+
+                const formData = new FormData();
+                formData.append('message', currentMsg);
+                formData.append('due', newDue.replace(' ', 'T')); // rough format
+                formData.append('recurrence', '');
+                // Send browser tz so "Local PC" time mode works on edits too
+                const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+                if (browserTz) formData.append('browser_tz', browserTz);
+
+                const updateRes = await fetch(`/api/reminders/${id}`, {
+                    method: 'PUT',
+                    body: formData
+                });
+
+                if (updateRes.ok) {
+                    window.location.reload();
+                } else {
+                    const err = await updateRes.json();
+                    alert('Edit failed: ' + (err.error || 'Unknown'));
+                }
+            } catch (err) {
+                alert('Error editing reminder');
+            }
+        }
+
+        async function loadLogs() {
+            const container = document.getElementById('logs-container');
+            container.innerHTML = '<div class="text-zinc-400">Loading...</div>';
+
+            const channelFilter = document.getElementById('log-filter-channel')?.value || '';
+            const statusFilter = document.getElementById('log-filter-status')?.value || '';
+
+            let url = '/api/logs?limit=40';
+            if (channelFilter) url += `&channel=${channelFilter}`;
+            if (statusFilter) url += `&status=${statusFilter}`;
+
+            try {
+                const res = await fetch(url);
+                const data = await res.json();
+
+                if (!data.logs || data.logs.length === 0) {
+                    container.innerHTML = `
+                        <div class="text-center py-8 text-zinc-400">
+                            <i class="fa-solid fa-history text-2xl mb-2 block"></i>
+                            <p>No activity matching filters.</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                let html = `
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left">
+                            <thead>
+                                <tr class="border-b border-zinc-700 text-xs text-zinc-400">
+                                    <th class="pb-2 pr-4">Time</th>
+                                    <th class="pb-2 pr-4">Reminder</th>
+                                    <th class="pb-2 pr-4">Channel</th>
+                                    <th class="pb-2 pr-4">Status</th>
+                                    <th class="pb-2 pr-4 w-10"></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                `;
+
+                data.logs.forEach(log => {
+                    const time = log.timestamp ? log.timestamp.split('T')[0] + ' ' + log.timestamp.split('T')[1]?.substring(0,5) : '';
+                    let statusClass = 'text-emerald-400';
+                    if (log.status === 'FAILED') statusClass = 'text-red-400';
+                    if (log.status === 'SKIPPED') statusClass = 'text-amber-400';
+
+                    html += `
+                        <tr class="border-b border-zinc-800 hover:bg-zinc-950">
+                            <td class="py-2 pr-4 font-mono text-xs text-zinc-400">${time}</td>
+                            <td class="py-2 pr-4 text-zinc-200">${log.message || ''}</td>
+                            <td class="py-2 pr-4">
+                                <span class="inline px-2 py-0.5 rounded bg-zinc-800 text-xs">${log.channel}</span>
+                            </td>
+                            <td class="py-2 pr-4">
+                                <span class="${statusClass} text-xs font-medium">${log.status}</span>
+                            </td>
+                            <td class="py-2 pr-4 text-right">
+                                <button onclick="deleteLog(${log.id}, this)" 
+                                        class="text-zinc-500 hover:text-red-400 p-1">
+                                    <i class="fa-solid fa-trash text-sm"></i>
+                                </button>
+                            </td>
+                        </tr>
+                    `;
+                });
+
+                html += `</tbody></table></div>`;
+                container.innerHTML = html;
+
+            } catch (err) {
+                container.innerHTML = `<div class="text-red-400">Failed to load logs: ${err}</div>`;
+            }
+        }
+
+        async function deleteLog(logId, btn) {
+            if (!confirm('Delete this log entry?')) return;
+
+            try {
+                const res = await fetch(`/api/logs/${logId}`, { method: 'DELETE' });
+                if (res.ok) {
+                    btn.closest('tr').remove();
+                } else {
+                    alert('Failed to delete log');
+                }
+            } catch (err) {
+                alert('Error deleting log');
+            }
+        }
+
+        async function clearAllLogs() {
+            if (!confirm('Delete ALL log entries? This cannot be undone.')) return;
+
+            try {
+                const res = await fetch('/api/logs', { method: 'DELETE' });
+                const data = await res.json();
+                if (data.success) {
+                    loadLogs();
+                } else {
+                    alert('Failed to clear logs: ' + (data.error || 'Unknown error'));
+                }
+            } catch (err) {
+                alert('Error clearing logs');
+            }
+        }
+
+        async function testTelegram() {
+            try {
+                const res = await fetch('/api/test-telegram', { method: 'POST' });
+                const data = await res.json();
+
+                if (data.success) {
+                    alert(data.message);
+                } else {
+                    // Show the full helpful error message (supports newlines)
+                    alert("Telegram Test Failed:\n\n" + (data.error || "Unknown error"));
+                }
+            } catch (err) {
+                // Try to give better feedback if possible
+                if (err.name === 'SyntaxError') {
+                    alert("❌ Server returned an invalid response (possible 500 error). Check container logs.");
+                } else {
+                    alert("❌ Network error while testing Telegram. Check your connection or container logs.");
+                }
+                console.error("Test Telegram error:", err);
+            }
+        }
+
+        // Allow pressing Escape to close modal
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                const modal = document.getElementById('add-modal');
+                if (!modal.classList.contains('hidden')) hideAddModal();
+            }
+        });
+
+        async function loadHeartbeatSettings() {
+            try {
+                const res = await fetch('/api/settings/heartbeat');
+                const data = await res.json();
+
+                document.getElementById('heartbeat-interval').value = data.interval || 6;
+                document.getElementById('heartbeat-file-location').value = data.file_location || '/app (Docker)';
+            } catch (err) {
+                console.error('Failed to load heartbeat settings', err);
+            }
+        }
+
+        async function saveHeartbeatSettings() {
+            const interval = document.getElementById('heartbeat-interval').value;
+            const fileLocation = document.getElementById('heartbeat-file-location').value;
+            const statusEl = document.getElementById('heartbeat-status');
+
+            statusEl.textContent = 'Saving...';
+
+            try {
+                const formData = new FormData();
+                formData.append('interval', interval);
+                formData.append('file_location', fileLocation);
+
+                const res = await fetch('/api/settings/heartbeat', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    statusEl.textContent = '✅ Saved!';
+                    setTimeout(() => statusEl.textContent = '', 2500);
+                } else {
+                    statusEl.textContent = '❌ ' + (data.error || 'Failed');
+                }
+            } catch (err) {
+                statusEl.textContent = '❌ Network error';
+            }
+        }
+
+        async function testHeartbeat() {
+            const statusEl = document.getElementById('heartbeat-status');
+            statusEl.textContent = 'Sending...';
+
+            try {
+                const res = await fetch('/api/heartbeat/test', { method: 'POST' });
+                const data = await res.json();
+
+                if (data.success) {
+                    statusEl.textContent = '✅ Heartbeat sent!';
+                } else {
+                    statusEl.textContent = '❌ ' + (data.error || 'Failed');
+                }
+
+                setTimeout(() => {
+                    if (statusEl.textContent.includes('✅') || statusEl.textContent.includes('❌')) {
+                        statusEl.textContent = '';
+                    }
+                }, 4000);
+            } catch (err) {
+                statusEl.textContent = '❌ Network error';
+            }
+        }
+
+        // === Notification Channels UI ===
+
+        async function loadChannels() {
+            // Populate sidebar version (preferred)
+            const container = document.getElementById('channels-list-sidebar') || document.getElementById('channels-list');
+            if (!container) return;
+
+            try {
+                const res = await fetch('/api/channels');
+                const data = await res.json();
+
+                let html = '';
+                data.channels.forEach(channel => {
+                    const status = channel.configured 
+                        ? '<span class="text-emerald-400 text-xs font-medium">Configured</span>' 
+                        : '<span class="text-amber-400 text-xs font-medium">Not configured</span>';
+
+                    let statusInfo = '';
+                    if (channel.last_success || channel.last_failure) {
+                        statusInfo = `
+                            <div class="text-xs text-zinc-500 mt-1">
+                                ${channel.last_success ? `Last success: ${channel.last_success.split('T')[0]}` : ''}
+                                ${channel.last_failure ? ` • Last failure: ${channel.last_failure.split('T')[0]}` : ''}
+                            </div>
+                        `;
+                    }
+
+                    html += `
+                        <div class="bg-zinc-950 border border-zinc-800 rounded-2xl p-4">
+                            <div class="flex justify-between items-center">
+                                <div class="flex items-center gap-3">
+                                    <span class="text-xl">${channel.emoji || ''}</span>
+                                    <div>
+                                        <div class="font-medium text-sm">${channel.label}</div>
+                                        <div>${status}</div>
+                                        ${statusInfo}
+                                    </div>
+                                </div>
+                                <div class="flex gap-1">
+                                    <button onclick="configureChannel('${channel.name}')" 
+                                            class="px-3 py-1 text-xs bg-zinc-700 hover:bg-zinc-600 rounded-lg">
+                                        Edit
+                                    </button>
+                                    <button onclick="testChannel('${channel.name}')" 
+                                            class="px-3 py-1 text-xs bg-blue-700 hover:bg-blue-600 rounded-lg">
+                                        Test
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+
+                container.innerHTML = html || '<div class="text-zinc-400 text-xs">No channels.</div>';
+
+            } catch (err) {
+                container.innerHTML = '<div class="text-red-400">Failed to load channels.</div>';
+            }
+        }
+
+        let currentChannelName = null;
+
+        async function configureChannel(channelName) {
+            currentChannelName = channelName;
+
+            const res = await fetch(`/api/channels/${channelName}`);
+            const details = await res.json();
+
+            // Set modal title
+            document.getElementById('channel-modal-title').textContent = `Configure ${details.label}`;
+
+            // Build dynamic form fields
+            const fieldsContainer = document.getElementById('channel-fields');
+            fieldsContainer.innerHTML = '';
+
+            details.fields.forEach(field => {
+                const key = field.key.replace(`${channelName.toUpperCase()}_`, '');
+                const currentValue = details.credentials[key] || '';
+
+                const div = document.createElement('div');
+                div.innerHTML = `
+                    <label class="block text-sm text-zinc-400 mb-1.5">${field.prompt || key}</label>
+                    <input type="text" name="${field.key}" 
+                           class="w-full bg-zinc-950 border border-zinc-800 focus:border-emerald-600 rounded-2xl px-4 py-2.5 text-sm"
+                           placeholder="${field.prompt || key}"
+                           value="${currentValue}">
+                `;
+                fieldsContainer.appendChild(div);
+            });
+
+            // Show modal
+            const modal = document.getElementById('channel-modal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function hideChannelModal() {
+            const modal = document.getElementById('channel-modal');
+            modal.classList.remove('flex');
+            modal.classList.add('hidden');
+            currentChannelName = null;
+        }
+
+        async function submitChannelConfig(e) {
+            e.preventDefault();
+
+            if (!currentChannelName) return;
+
+            const form = document.getElementById('channel-form');
+            const formData = new FormData(form);
+            const creds = {};
+
+            for (let [key, value] of formData.entries()) {
+                creds[key] = value;
+            }
+
+            try {
+                const res = await fetch(`/api/channels/${currentChannelName}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: new URLSearchParams({ credentials: JSON.stringify(creds) })
+                });
+
+                const data = await res.json();
+
+                if (data.success) {
+                    alert(data.message || "Saved successfully");
+                    hideChannelModal();
+                    loadChannels();
+                } else {
+                    alert("Failed to save: " + (data.error || "Unknown error"));
+                }
+            } catch (err) {
+                alert("Network error while saving credentials");
+            }
+        }
+
+        async function clearChannelCredentials() {
+            if (!currentChannelName || !confirm(`Clear all credentials for this channel?`)) return;
+
+            try {
+                const res = await fetch(`/api/channels/${currentChannelName}`, {
+                    method: 'DELETE'
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    alert(data.message);
+                    hideChannelModal();
+                    loadChannels();
+                } else {
+                    alert("Failed to clear: " + (data.error || "Unknown error"));
+                }
+            } catch (err) {
+                alert("Network error while clearing credentials");
+            }
+        }
+
+        async function testCurrentChannel() {
+            if (!currentChannelName) return;
+
+            try {
+                const res = await fetch(`/api/channels/${currentChannelName}/test`, {
+                    method: 'POST'
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    alert(data.message);
+                } else {
+                    alert("Test failed: " + (data.error || "Unknown error"));
+                }
+            } catch (err) {
+                alert("Network error while testing channel");
+            }
+        }
+
+        async function testChannel(channelName) {
+            try {
+                const res = await fetch(`/api/channels/${channelName}/test`, { method: 'POST' });
+                let data = {};
+                try {
+                    data = await res.json();
+                } catch (e) {}
+
+                if (data.success) {
+                    alert(data.message);
+                } else {
+                    const errorMsg = data.error || data.detail || data.message || `Test failed (status ${res.status})`;
+                    alert("Test failed:\n\n" + errorMsg);
+                }
+            } catch (err) {
+                alert("Network error while testing channel");
+            }
+        }
+
+        // === View Navigation System ===
+        function showView(viewName) {
+            // Hide all views
+            document.querySelectorAll('[id^="view-"]').forEach(el => el.classList.add('hidden'));
+            
+            // Show selected view
+            const target = document.getElementById('view-' + viewName);
+            if (target) {
+                target.classList.remove('hidden');
+            } else {
+                // Fallback to main
+                document.getElementById('view-main').classList.remove('hidden');
+            }
+            
+            // Update active state in sidebar if needed
+            document.querySelectorAll('.sidebar-nav-item').forEach(el => el.classList.remove('bg-zinc-800'));
+            const activeLink = document.querySelector(`[data-view="${viewName}"]`);
+            if (activeLink) activeLink.classList.add('bg-zinc-800');
+        }
+
+        function showConfigView(type) {
+            // Hide all main views
+            document.getElementById('view-main').classList.add('hidden');
+            document.getElementById('view-services').classList.add('hidden');
+            document.getElementById('view-heartbeat').classList.add('hidden');
+            const timeView = document.getElementById('view-time');
+            if (timeView) timeView.classList.add('hidden');
+
+            if (type === 'services') {
+                document.getElementById('view-services').classList.remove('hidden');
+            } else if (type === 'heartbeat') {
+                document.getElementById('view-heartbeat').classList.remove('hidden');
+            } else if (type === 'time') {
+                if (timeView) {
+                    timeView.classList.remove('hidden');
+                    loadTimeSettings();   // fetch current mode + start live clocks
+                }
+            }
+        }
+
+        // Load channels on page load
+        window.addEventListener('load', function() {
+            loadLogs();
+            loadHeartbeatSettings();
+            loadChannels();
+            loadDashboardStats();
+            startLiveClock();
+            refreshVersionBadge();   // always fetch latest version from API (helps with caching)
+
+            // Show main view by default
+            document.getElementById('view-main').classList.remove('hidden');
+        });
+
+        function startLiveClock() {
+            const el = document.getElementById('top-nav-datetime-text');
+            if (!el) return;
+
+            function update() {
+                const now = new Date();
+                el.textContent = now.toLocaleString([], {
+                    weekday: 'short',
+                    month: 'short', 
+                    day: 'numeric',
+                    hour: '2-digit', 
+                    minute: '2-digit'
+                });
+            }
+            update();
+            setInterval(update, 10000); // update every 10s for a more live feel
+        }
+
+        async function loadDashboardStats() {
+            try {
+                const res = await fetch('/api/stats');
+                const stats = await res.json();
+
+                const pendingEl = document.getElementById('pending-count');
+                if (pendingEl) pendingEl.textContent = stats.pending ?? '—';
+
+                const sentEl = document.getElementById('sent-today-count');
+                if (sentEl) sentEl.textContent = stats.sent_today ?? '—';
+
+                const activeEl = document.getElementById('active-channels-count');
+                if (activeEl) activeEl.textContent = stats.active_channels ?? '—';
+            } catch (err) {
+                console.error('Failed to load dashboard stats', err);
+            }
+        }
+
+        async function refreshVersionBadge() {
+            try {
+                const res = await fetch('/api/version');
+                const data = await res.json();
+                const badge = document.getElementById('app-version-badge');
+                if (badge && data.version) {
+                    badge.textContent = 'v' + data.version;
+                }
+            } catch (e) {
+                // silent fail - server-side version is already shown
+            }
+        }
+
+        // =====================================================================
+        // Time & Date Sync UI (NTP vs Local PC)
+        // =====================================================================
+
+        let currentTimeMode = 'server';
+        let timeClocksInterval = null;
+
+        async function loadTimeSettings() {
+            // Stop any previous clock polling when leaving the view
+            if (timeClocksInterval) {
+                clearInterval(timeClocksInterval);
+                timeClocksInterval = null;
+            }
+
+            try {
+                const res = await fetch('/api/settings/time');
+                const data = await res.json();
+
+                currentTimeMode = data.mode || 'server';
+
+                // Populate server tz label (from backend)
+                const serverTzEl = document.getElementById('server-tz-label');
+                if (serverTzEl) serverTzEl.textContent = data.server_timezone || '—';
+
+                // Highlight the correct card
+                highlightTimeModeCard(currentTimeMode);
+
+                // Start live comparison clocks
+                startTimeComparisonClocks();
+
+            } catch (err) {
+                console.error('Failed to load time settings', err);
+                // Fallback: still allow local selection
+                highlightTimeModeCard('server');
+            }
+        }
+
+        function highlightTimeModeCard(mode) {
+            const serverCard = document.getElementById('mode-card-server');
+            const localCard = document.getElementById('mode-card-local');
+
+            if (!serverCard || !localCard) return;
+
+            if (mode === 'server') {
+                serverCard.classList.add('border-emerald-600');
+                serverCard.classList.remove('border-zinc-700');
+                localCard.classList.remove('border-sky-500');
+                localCard.classList.add('border-zinc-700');
+            } else {
+                localCard.classList.add('border-sky-500');
+                localCard.classList.remove('border-zinc-700');
+                serverCard.classList.remove('border-emerald-600');
+                serverCard.classList.add('border-zinc-700');
+            }
+        }
+
+        function selectTimeMode(mode) {
+            currentTimeMode = mode;
+            highlightTimeModeCard(mode);
+        }
+
+        async function saveTimeMode() {
+            const statusArea = document.getElementById('time-diff'); // reuse the diff area for status
+            if (!statusArea) return;
+
+            const originalText = statusArea.textContent;
+
+            statusArea.textContent = 'Saving...';
+            statusArea.classList.add('text-emerald-400');
+
+            try {
+                const formData = new FormData();
+                formData.append('mode', currentTimeMode);
+
+                const res = await fetch('/api/settings/time', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    statusArea.textContent = '✅ Saved! ' + (data.message || '');
+                    setTimeout(() => {
+                        statusArea.textContent = originalText || '—';
+                        statusArea.classList.remove('text-emerald-400');
+                    }, 2200);
+                } else {
+                    statusArea.textContent = '❌ ' + (data.error || 'Failed');
+                    setTimeout(() => {
+                        statusArea.textContent = originalText || '—';
+                        statusArea.classList.remove('text-emerald-400');
+                    }, 3000);
+                }
+            } catch (err) {
+                statusArea.textContent = '❌ Network error';
+                setTimeout(() => {
+                    statusArea.textContent = originalText || '—';
+                    statusArea.classList.remove('text-emerald-400');
+                }, 3000);
+            }
+        }
+
+        function startTimeComparisonClocks() {
+            const serverEl = document.getElementById('server-time-now');
+            const browserEl = document.getElementById('browser-time-now');
+            const diffEl = document.getElementById('time-diff');
+
+            if (!serverEl || !browserEl || !diffEl) return;
+
+            // Set browser tz label once
+            const browserTzEl = document.getElementById('browser-tz-label');
+            const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+            if (browserTzEl) browserTzEl.textContent = browserTz || 'Local';
+
+            async function tick() {
+                // Browser time (always accurate to user's PC)
+                const bNow = new Date();
+                browserEl.textContent = bNow.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+                // Server time
+                try {
+                    const res = await fetch('/api/server-time');
+                    const s = await res.json();
+                    // We show the server "local" time in its configured zone
+                    serverEl.textContent = s.server_local || s.utc || '—';
+
+                    // Calculate rough difference in minutes
+                    const serverEpoch = s.epoch || Math.floor(Date.now() / 1000);
+                    const browserEpoch = Math.floor(bNow.getTime() / 1000);
+                    const deltaMin = Math.round((browserEpoch - serverEpoch) / 60);
+
+                    if (Math.abs(deltaMin) <= 1) {
+                        diffEl.textContent = 'Almost identical (±1 min)';
+                        diffEl.className = 'font-mono text-xl font-semibold text-emerald-400';
+                    } else if (Math.abs(deltaMin) < 5) {
+                        diffEl.textContent = `${deltaMin > 0 ? '+' : ''}${deltaMin} min`;
+                        diffEl.className = 'font-mono text-xl font-semibold text-amber-400';
+                    } else {
+                        diffEl.textContent = `${deltaMin > 0 ? '+' : ''}${deltaMin} min — clocks are quite different!`;
+                        diffEl.className = 'font-mono text-xl font-semibold text-red-400';
+                    }
+                } catch (e) {
+                    serverEl.textContent = '—';
+                    diffEl.textContent = 'Unable to reach server';
+                    diffEl.className = 'font-mono text-xl font-semibold text-zinc-500';
+                }
+            }
+
+            tick(); // immediate
+            timeClocksInterval = setInterval(tick, 8000); // refresh every 8s while view is open
+        }
+
+        // Make sure we stop the interval when user navigates away from the time view
+        // (simple approach: the next loadTimeSettings clears it)
+    </script>
+</body>
+</html>

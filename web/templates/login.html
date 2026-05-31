@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign in • Notifier</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Space+Grotesk:wght@500;600&amp;display=swap');
+        
+        :root {
+            --primary: #22c55e;
+        }
+        
+        body {
+            font-family: 'Inter', system_ui, sans-serif;
+        }
+        
+        .font-display {
+            font-family: 'Space Grotesk', 'Inter', sans-serif;
+            font-weight: 600;
+        }
+
+        .glass {
+            background: rgba(255, 255, 255, 0.08);
+            backdrop-filter: blur(20px);
+        }
+
+        .login-card {
+            box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.4);
+        }
+
+        .input-focus {
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        
+        .input-focus:focus {
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.15);
+            border-color: #22c55e;
+        }
+
+        .notifier-gradient {
+            background: linear-gradient(135deg, #22c55e, #16a34a);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+    </style>
+</head>
+<body class="bg-zinc-950 text-zinc-200">
+    <div class="min-h-screen flex items-center justify-center p-6">
+        <div class="w-full max-w-md">
+            
+            <!-- Logo / Header -->
+            <div class="text-center mb-8">
+                <div class="inline-flex items-center justify-center w-16 h-16 bg-zinc-900 rounded-2xl border border-zinc-800 mb-4">
+                    <i class="fa-solid fa-bell text-3xl text-emerald-500"></i>
+                </div>
+                <h1 class="text-3xl font-display tracking-tight">Notifier</h1>
+                <p class="text-zinc-500 mt-1 text-sm">Multi-channel reminders</p>
+            </div>
+
+            <!-- Login Card -->
+            <div class="bg-zinc-900 border border-zinc-800 rounded-3xl p-8 login-card">
+                <div class="mb-6">
+                    <h2 class="text-2xl font-semibold tracking-tight">Welcome back</h2>
+                    <p class="text-zinc-400 mt-1 text-sm">Sign in to access your notification dashboard</p>
+                </div>
+
+                {% if error %}
+                <div class="mb-6 rounded-2xl bg-red-950/60 border border-red-900 px-4 py-3 flex items-start gap-3">
+                    <i class="fa-solid fa-exclamation-triangle text-red-400 mt-0.5"></i>
+                    <div class="text-sm">
+                        <span class="font-medium text-red-400">Login failed.</span>
+                        <span class="text-red-300/80">Please check your username and password.</span>
+                    </div>
+                </div>
+                {% endif %}
+
+                <form action="/login" method="POST" class="space-y-5">
+                    <input type="hidden" name="next" value="{{ next_url or '/' }}">
+
+                    <!-- Username Field -->
+                    <div>
+                        <label for="username" class="block text-sm font-medium text-zinc-400 mb-1.5">
+                            Username
+                        </label>
+                        <input 
+                            type="text" 
+                            id="username" 
+                            name="username" 
+                            value="admin"
+                            required
+                            autocomplete="username"
+                            class="input-focus w-full bg-zinc-950 border border-zinc-800 focus:border-emerald-600 rounded-2xl px-4 py-3 text-base placeholder-zinc-600"
+                            placeholder="admin"
+                        >
+                    </div>
+
+                    <!-- Password Field -->
+                    <div>
+                        <label for="password" class="block text-sm font-medium text-zinc-400 mb-1.5">
+                            Password
+                        </label>
+                        <div class="relative">
+                            <input 
+                                type="password" 
+                                id="password" 
+                                name="password" 
+                                required
+                                autocomplete="current-password"
+                                class="input-focus w-full bg-zinc-950 border border-zinc-800 focus:border-emerald-600 rounded-2xl px-4 py-3 text-base placeholder-zinc-600"
+                                placeholder="Enter your password"
+                            >
+                            <button 
+                                type="button" 
+                                onclick="togglePassword()"
+                                class="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 transition-colors"
+                            >
+                                <i class="fa-solid fa-eye" id="eye-icon"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Submit -->
+                    <button 
+                        type="submit"
+                        class="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 transition-all font-semibold text-white rounded-2xl py-3.5 text-base shadow-lg shadow-emerald-950/50"
+                    >
+                        <span>Sign in</span>
+                        <i class="fa-solid fa-arrow-right"></i>
+                    </button>
+                </form>
+
+                <div class="mt-6 text-center">
+                    <p class="text-xs text-zinc-500">
+                        {% if auth_enabled %}
+                            Enter any username you like. The password is what secures this instance.
+                        {% else %}
+                            <span class="text-amber-400">Authentication is currently disabled</span> (dev mode)
+                        {% endif %}
+                    </p>
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <div class="text-center mt-6">
+                <p class="text-xs text-zinc-600">
+                    Secure session • Cookie-based authentication
+                </p>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        function togglePassword() {
+            const input = document.getElementById('password');
+            const icon = document.getElementById('eye-icon');
+            
+            if (input.type === 'password') {
+                input.type = 'text';
+                icon.classList.remove('fa-eye');
+                icon.classList.add('fa-eye-slash');
+            } else {
+                input.type = 'password';
+                icon.classList.remove('fa-eye-slash');
+                icon.classList.add('fa-eye');
+            }
+        }
+
+        // Focus password field on load
+        window.onload = function() {
+            const pwd = document.getElementById('password');
+            if (pwd) pwd.focus();
+        }
+
+        // Allow pressing Enter anywhere on the card
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                const form = document.querySelector('form');
+                if (form) form.submit();
+            }
+        });
+    </script>
+</body>
+</html>
