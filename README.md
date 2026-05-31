@@ -268,7 +268,7 @@ python notifier.py
 
 ```
 ╔═══════════════════════════════════════╗
-║  📋 NOTIFICATION MENU         v2.3.0 ║
+║  📋 NOTIFICATION MENU         v2.4.0 ║
 ╚═══════════════════════════════════════╝
   1  ➕  Add Notification
   2  📋  View Notifications
@@ -282,7 +282,7 @@ python notifier.py
   9  📥  Import from JSON
  10  🖥️   Open GUI (Tkinter)
   ─────────────────────────────────────
- 11  ⚙️   System  [v2.3.0]
+ 11  ⚙️   System  [v2.4.0]
   ─────────────────────────────────────
   0  🚪  Exit
 ```
@@ -325,7 +325,7 @@ Expected JSON format:
 
 ```
 ╔═══════════════════════════════════════╗
-║  ⚙️  SYSTEM                   v2.3.0 ║
+║  ⚙️  SYSTEM                   v2.4.0 ║
 ╚═══════════════════════════════════════╝
   1  📜  View Version History
   2  ➕  Add New Version Release
