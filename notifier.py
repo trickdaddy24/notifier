@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# notifier.py — Notification App v2.1.0
+# notifier.py — Notification App (version: notifier.__version__ / version_notes.db)
 
 import random
 import sys
@@ -1088,13 +1088,14 @@ def system_menu():
 # ── Version helper ─────────────────────────────────────────────────────────────
 
 def _get_app_version() -> str:
-    """Read current version from version_notes.db; fall back to hardcoded."""
+    """Live version from version_notes.db; fall back to the package __version__."""
     try:
         import version_manager as vm
         vm.setup_database()
         return vm.get_current_version()
     except Exception:
-        return "2.1.0"
+        from notifier import __version__
+        return __version__
 
 # ── Background runner ──────────────────────────────────────────────────────────
 

@@ -264,7 +264,7 @@ python notifier.py
 
 ```
 ╔═══════════════════════════════════════╗
-║  📋 NOTIFICATION MENU         v2.1.0 ║
+║  📋 NOTIFICATION MENU         v2.3.0 ║
 ╚═══════════════════════════════════════╝
   1  ➕  Add Notification
   2  📋  View Notifications
@@ -278,7 +278,7 @@ python notifier.py
   9  📥  Import from JSON
  10  🖥️   Open GUI (Tkinter)
   ─────────────────────────────────────
- 11  ⚙️   System  [v2.1.0]
+ 11  ⚙️   System  [v2.3.0]
   ─────────────────────────────────────
   0  🚪  Exit
 ```
@@ -321,7 +321,7 @@ Expected JSON format:
 
 ```
 ╔═══════════════════════════════════════╗
-║  ⚙️  SYSTEM                   v2.1.0 ║
+║  ⚙️  SYSTEM                   v2.3.0 ║
 ╚═══════════════════════════════════════╝
   1  📜  View Version History
   2  ➕  Add New Version Release
@@ -348,7 +348,7 @@ Expected JSON format:
 
 ```
 notifier/
-├── notifier.py               # Main application (v2.1.0)
+├── notifier.py               # Main application (CLI entry point)
 ├── version_manager.py        # Version tracking & CHANGELOG.md generation
 ├── requirements.txt
 ├── install.sh                # One-liner Linux installer

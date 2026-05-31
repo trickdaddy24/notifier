@@ -72,22 +72,24 @@ except ImportError:
 
 
 def get_app_version() -> str:
-    """Return the current application version from version_notes.db.
-    Falls back gracefully if the version manager can't be imported.
+    """Live version from version_notes.db; fall back to the package __version__.
+
+    version_manager.py lives at the repo root (it is a top-level module, not a
+    submodule of the notifier package), so we import it as `version_manager`.
     """
     try:
-        # Normal import when the package structure is available
-        from notifier.version_manager import get_current_version
-        return get_current_version()
+        import version_manager
+        return version_manager.get_current_version()
     except Exception:
         try:
-            # Fallback when running the web app in isolation (dev)
+            # Ensure the repo root (where version_manager.py lives) is importable.
             import sys
-            sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-            from notifier.version_manager import get_current_version
-            return get_current_version()
+            sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+            import version_manager
+            return version_manager.get_current_version()
         except Exception:
-            return "2.2.0"  # last known good fallback
+            from notifier import __version__
+            return __version__
 
 
 def get_upcoming_reminders(limit: int = 50):
@@ -506,7 +508,7 @@ async def test_telegram(user: Optional[str] = Depends(get_current_user)):
         from notifier.notifications import send_telegram_message
 
         test_message = (
-            f"✅ Test from Notifier Web UI (v2.2.0)\n"
+            f"✅ Test from Notifier Web UI (v{get_app_version()})\n"
             f"User: {user}\n"
             f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
         )

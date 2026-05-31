@@ -162,9 +162,15 @@ def seed_initial_versions():
 
 
 def get_current_version() -> str:
-    """Return the latest version string from the DB, or '1.0.39' as fallback."""
+    """Return the latest version from the DB, or the package __version__ anchor."""
     latest = get_latest_version_data()
-    return latest[1] if latest else "2.1.0"
+    if latest:
+        return latest[1]
+    try:
+        from notifier import __version__
+        return __version__
+    except Exception:
+        return "0.0.0"
 
 
 def get_latest_version_data():
