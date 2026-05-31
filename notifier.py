@@ -1,22 +1,16 @@
 # -*- coding: utf-8 -*-
 # notifier.py — Notification App v2.1.0
 
-import calendar
 import random
-import sqlite3
 import sys
 import time
 import threading
 import os
-import smtplib
 import logging
 import json
 import platform
 import socket
-from contextlib import contextmanager
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from datetime import datetime, timedelta
+from datetime import datetime
 from colorama import init, Fore, Style
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import schedule
@@ -74,77 +68,22 @@ init(autoreset=False)  # Colorama — we manage reset manually
 ENV_PATH = Path(__file__).parent / '.env'
 load_dotenv(str(ENV_PATH))
 
-DB_NAME = "notifications.db"
-
-# ── Database context manager ───────────────────────────────────────────────────
-
-@contextmanager
-def get_db():
-    """Thread-safe SQLite connection with WAL journal mode."""
-    conn = sqlite3.connect(DB_NAME, timeout=10)
-    conn.execute("PRAGMA journal_mode=WAL;")
-    conn.execute("PRAGMA synchronous=NORMAL;")
-    conn.execute("PRAGMA busy_timeout=5000;")
-    try:
-        yield conn
-    finally:
-        conn.close()
-
-
-def init_db():
-    """Initialize the database schema and migrate from older versions."""
-    with get_db() as conn:
-        c = conn.cursor()
-
-        # Notifications table
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS notifications (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                message     TEXT NOT NULL,
-                due_time    TEXT NOT NULL,
-                due_ts      INTEGER NOT NULL DEFAULT 0,
-                sent        INTEGER DEFAULT 0,
-                recurrence  TEXT DEFAULT NULL,
-                repeat_time TEXT DEFAULT NULL
-            )
-        ''')
-
-        # Audit log table
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS logs (
-                id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                notification_id INTEGER,
-                timestamp       TEXT NOT NULL,
-                channel         TEXT NOT NULL,
-                status          TEXT NOT NULL,
-                response        TEXT
-            )
-        ''')
-
-        # Indexes for fast queries
-        c.execute("CREATE INDEX IF NOT EXISTS idx_notifications_due ON notifications(sent, due_ts)")
-        c.execute("CREATE INDEX IF NOT EXISTS idx_logs_time ON logs(timestamp)")
-
-        # ── Migrations (v1.0.43 → v2.0.0) ──────────────────────────────────────
-        for col, defn in [
-            ("due_ts",      "INTEGER DEFAULT 0"),
-            ("recurrence",  "TEXT DEFAULT NULL"),
-            ("repeat_time", "TEXT DEFAULT NULL"),
-        ]:
-            try:
-                c.execute(f"ALTER TABLE notifications ADD COLUMN {col} {defn}")
-            except sqlite3.OperationalError:
-                pass  # column already exists
-
-        # Backfill due_ts for any rows where it is 0 or NULL
-        c.execute("SELECT id, due_time FROM notifications WHERE due_ts = 0 OR due_ts IS NULL")
-        for row_id, due_str in c.fetchall():
-            dt = _parse_due_time(due_str)
-            if dt:
-                c.execute("UPDATE notifications SET due_ts = ? WHERE id = ?",
-                          (_to_ts(dt), row_id))
-
-        conn.commit()
+# ── Shared engine (single source of truth — see notifier/ package) ────────────
+# Delivery, the channel registry, audit logging, recurrence math and the
+# timezone helpers all live in the package so the CLI and the FastAPI web UI
+# run the exact same code. Absolute imports (not `from .db`) so this entry
+# script works when launched as `python notifier.py`.
+from notifier.db import (
+    get_db, init_db, DB_PATH as DB_NAME,
+    _get_user_tz, _now_in_tz, _tz_label, _to_ts, _from_ts, _relative_due,
+    _parse_due_time, _next_daily_time, _next_month_dt, _next_recurrence_ts,
+)
+from notifier.notifications import (
+    CHANNELS, db_log, _channel_configured, _is_transient, _deliver,
+    send_notifications, send_heartbeat, set_quiet_mode,
+    send_telegram_message, send_discord_message,
+    send_pushover_message, send_email_message,
+)
 
 # ── Shared UI helpers ──────────────────────────────────────────────────────────
 
@@ -180,249 +119,10 @@ def masked(val):
         return "******"
     return val[:3] + "..." + val[-3:]
 
-
-# When the background scheduler fires a send, its stdout would scramble the
-# interactive menu the user is sitting in. _QUIET suppresses sender chatter
-# during scheduled runs; everything still goes to the log + audit DB.
-_QUIET = False
-
-
-def _cprint(*args, **kwargs):
-    """print() that is silenced while the scheduler thread is running a job."""
-    if not _QUIET:
-        print(*args, **kwargs)
-
-# ── Timezone helpers ───────────────────────────────────────────────────────────
-
-def _get_user_tz():
-    """Return a ZoneInfo for the configured TIMEZONE env var, or None for system local."""
-    tz_name = os.getenv('TIMEZONE', '').strip()
-    if not tz_name:
-        return None
-    try:
-        return ZoneInfo(tz_name)
-    except (ZoneInfoNotFoundError, KeyError):
-        print(f"{Fore.YELLOW}⚠️  Unknown timezone '{tz_name}' — using system local time.{Style.RESET_ALL}")
-        return None
-
-
-def _now_in_tz() -> datetime:
-    """Current time in the configured timezone as a naive datetime."""
-    tz = _get_user_tz()
-    if tz is None:
-        return datetime.now()
-    return datetime.now(tz).replace(tzinfo=None)
-
-
-def _tz_label() -> str:
-    """Short timezone label for display."""
-    tz_name = os.getenv('TIMEZONE', '').strip()
-    return tz_name if tz_name else "system local"
-
-
-def _to_ts(dt: datetime) -> int:
-    """Epoch seconds for a *naive* wall-clock datetime, interpreted in the
-    configured TIMEZONE (or system local if unset).
-
-    A bare ``datetime.timestamp()`` assumes the machine's local zone, which is
-    wrong whenever TIMEZONE differs from the host clock (e.g. a UTC server).
-    All scheduling math must go through this helper.
-    """
-    tz = _get_user_tz()
-    if tz is None:
-        return int(dt.timestamp())
-    return int(dt.replace(tzinfo=tz).timestamp())
-
-
-def _from_ts(ts: int) -> datetime:
-    """Inverse of _to_ts: naive wall-clock datetime in the configured TIMEZONE."""
-    tz = _get_user_tz()
-    if tz is None:
-        return datetime.fromtimestamp(ts)
-    return datetime.fromtimestamp(ts, tz).replace(tzinfo=None)
-
-
-def _relative_due(due_ts: int) -> str:
-    """Human 'in 3h 12m' / 'overdue 5h' / 'due now' from an absolute epoch."""
-    if not due_ts:
-        return ""
-    delta = int(due_ts) - int(time.time())
-    overdue = delta < 0
-    secs = abs(delta)
-    if secs < 60:
-        return "due now"
-    d, rem = divmod(secs, 86400)
-    h, rem = divmod(rem, 3600)
-    m, _ = divmod(rem, 60)
-    if d:
-        body = f"{d}d {h}h" if h else f"{d}d"
-    elif h:
-        body = f"{h}h {m}m" if m else f"{h}h"
-    else:
-        body = f"{m}m"
-    return f"overdue {body}" if overdue else f"in {body}"
-
-# ── Date / recurrence helpers ──────────────────────────────────────────────────
-
-def _parse_due_time(due_str):
-    """Parse a due time string into a datetime. Supports YYYY-MM-DD and MM-DD-YYYY."""
-    for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S",
-                "%m-%d-%Y %H:%M", "%m-%d-%Y %H:%M:%S"):
-        try:
-            return datetime.strptime(due_str, fmt)
-        except ValueError:
-            continue
-    return None
-
-
-def _next_daily_time(time_str):
-    """Return the next future datetime for a daily HH:MM schedule."""
-    try:
-        h, m = map(int, time_str.split(':'))
-    except (ValueError, AttributeError):
-        return None
-    now = _now_in_tz()
-    candidate = now.replace(hour=h, minute=m, second=0, microsecond=0)
-    if candidate <= now:
-        candidate += timedelta(days=1)
-    return candidate
-
-
-def _next_month_dt(dt: datetime) -> datetime:
-    """Return the same day next calendar month, clamped to the last day if needed."""
-    month = dt.month + 1
-    year  = dt.year
-    if month > 12:
-        month = 1
-        year += 1
-    day = min(dt.day, calendar.monthrange(year, month)[1])
-    return dt.replace(year=year, month=month, day=day)
-
-
-def _next_recurrence_ts(due_ts, recurrence, repeat_time=None):
-    """Compute the next due_ts for a recurring notification. Rolls forward if past."""
-    now_ts = int(time.time())
-
-    if recurrence == "daily" and repeat_time:
-        next_dt = _next_daily_time(repeat_time)
-        return _to_ts(next_dt) if next_dt else None
-
-    if recurrence == "monthly":
-        next_dt = _next_month_dt(_from_ts(due_ts))
-        next_ts = _to_ts(next_dt)
-        while next_ts <= now_ts:
-            next_dt = _next_month_dt(next_dt)
-            next_ts = _to_ts(next_dt)
-        return next_ts
-
-    steps = {"daily": 86400, "weekly": 604800, "biweekly": 1209600}
-    step = steps.get(recurrence, 0)
-    if not step:
-        return None
-
-    next_ts = due_ts + step
-    while next_ts <= now_ts:
-        next_ts += step
-    return next_ts
-
-# ── Audit log ──────────────────────────────────────────────────────────────────
-
-def db_log(notification_id, channel, status, response=None):
-    """Write a send-attempt record to the logs table."""
-    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    try:
-        with get_db() as conn:
-            c = conn.cursor()
-            c.execute(
-                "INSERT INTO logs (notification_id, timestamp, channel, status, response)"
-                " VALUES (?, ?, ?, ?, ?)",
-                (notification_id, ts, channel, status, response),
-            )
-            conn.commit()
-        logging.info("%s | %s | %s | nid=%s | %s", ts, channel, status, notification_id, response)
-    except Exception as exc:
-        logging.error("db_log failed: %s", exc)
-
-# ── Senders (all return (bool, str)) ──────────────────────────────────────────
-
-def send_telegram_message(message):
-    bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
-    chat_id   = os.getenv('TELEGRAM_CHAT_ID')
-    if not bot_token or not chat_id:
-        return False, "Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID"
-    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    try:
-        r = requests.post(url, json={"chat_id": chat_id, "text": message}, timeout=10)
-        if r.status_code == 200:
-            _cprint(f"{Fore.GREEN}✅ Telegram message sent!{Style.RESET_ALL}")
-            return True, f"HTTP {r.status_code}"
-        _cprint(f"{Fore.RED}❌ Telegram API error: {r.status_code}{Style.RESET_ALL}")
-        return False, f"HTTP {r.status_code} - {r.text}"
-    except requests.exceptions.RequestException as e:
-        _cprint(f"{Fore.RED}❌ Failed to send Telegram: {e}{Style.RESET_ALL}")
-        return False, str(e)
-
-
-def send_discord_message(message):
-    webhook_url = os.getenv('DISCORD_WEBHOOK_URL')
-    if not webhook_url:
-        return False, "Missing DISCORD_WEBHOOK_URL"
-    try:
-        r = requests.post(webhook_url, json={"content": message}, timeout=10)
-        if r.status_code in (200, 204):
-            _cprint(f"{Fore.GREEN}✅ Discord message sent!{Style.RESET_ALL}")
-            return True, f"HTTP {r.status_code}"
-        _cprint(f"{Fore.RED}❌ Discord API error: {r.status_code}{Style.RESET_ALL}")
-        return False, f"HTTP {r.status_code} - {r.text}"
-    except requests.exceptions.RequestException as e:
-        _cprint(f"{Fore.RED}❌ Failed to send Discord: {e}{Style.RESET_ALL}")
-        return False, str(e)
-
-
-def send_pushover_message(message):
-    user_key  = os.getenv('PUSHOVER_USER_KEY')
-    api_token = os.getenv('PUSHOVER_API_TOKEN')
-    if not user_key or not api_token:
-        return False, "Missing PUSHOVER_USER_KEY or PUSHOVER_API_TOKEN"
-    url = "https://api.pushover.net/1/messages.json"
-    try:
-        r = requests.post(url, data={"token": api_token, "user": user_key, "message": message}, timeout=10)
-        if r.status_code == 200:
-            _cprint(f"{Fore.GREEN}✅ Pushover message sent!{Style.RESET_ALL}")
-            return True, f"HTTP {r.status_code}"
-        _cprint(f"{Fore.RED}❌ Pushover API error: {r.status_code}{Style.RESET_ALL}")
-        return False, f"HTTP {r.status_code} - {r.text}"
-    except requests.exceptions.RequestException as e:
-        _cprint(f"{Fore.RED}❌ Failed to send Pushover: {e}{Style.RESET_ALL}")
-        return False, str(e)
-
-
-def send_email_message(message, subject="⏰ Notification Reminder"):
-    smtp_server = os.getenv('EMAIL_SMTP_SERVER', 'smtp.gmail.com')
-    smtp_port   = int(os.getenv('EMAIL_SMTP_PORT', '587'))
-    sender      = os.getenv('EMAIL_SENDER', '')
-    password    = os.getenv('EMAIL_PASSWORD', '')
-    recipient   = os.getenv('EMAIL_RECIPIENT', '')
-    if not all([sender, password, recipient]):
-        return False, "Missing EMAIL_SENDER or EMAIL_PASSWORD or EMAIL_RECIPIENT"
-    try:
-        msg = MIMEMultipart()
-        msg['From']    = sender
-        msg['To']      = recipient
-        msg['Subject'] = subject
-        msg.attach(MIMEText(message, 'plain'))
-        server = smtplib.SMTP(smtp_server, smtp_port, timeout=20)
-        server.starttls()
-        server.login(sender, password)
-        server.send_message(msg)
-        server.quit()
-        _cprint(f"{Fore.GREEN}✅ Email sent!{Style.RESET_ALL}")
-        return True, "Email sent"
-    except Exception as e:
-        _cprint(f"{Fore.RED}❌ Failed to send email: {e}{Style.RESET_ALL}")
-        return False, str(e)
-
 # ── Verify functions ───────────────────────────────────────────────────────────
+# Senders, db_log and the recurrence helpers are imported from the shared engine
+# (notifier.notifications / notifier.db). The interactive verify_* helpers below
+# stay CLI-side because they print colored, human-facing output.
 
 def verify_telegram_config():
     bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
@@ -479,167 +179,20 @@ def verify_email_config():
     ok, _ = send_email_message("✅ Gmail verification successful!")
     return ok
 
-# ── Channel registry ───────────────────────────────────────────────────────────
-# One row per delivery channel. Adding a channel is now a data change here plus
-# a send_/verify_ pair — no more parallel menu/setter/loop copies to keep in sync.
+# ── Channel registry (CLI presentation layer) ────────────────────────────────
+# CHANNELS itself is imported from notifier.notifications (the single delivery
+# registry). Here we decorate each row with CLI-only metadata — a colorama
+# color and the interactive verify_* callable — without forking the list. The
+# web UI never sees (or needs) these extra keys.
 
-CHANNELS = [
-    {
-        "name": "telegram", "label": "Telegram", "emoji": "📱", "color": Fore.BLUE,
-        "send": send_telegram_message, "verify": verify_telegram_config,
-        "fields": [
-            {"key": "TELEGRAM_BOT_TOKEN", "prompt": "Bot Token", "secret": False, "mask": True},
-            {"key": "TELEGRAM_CHAT_ID",   "prompt": "Chat ID",   "secret": False, "mask": False},
-        ],
-        "display_extra": [],
-        "setup": [
-            "1. Message @BotFather on Telegram",
-            "2. Send /newbot and follow instructions",
-            "3. Get your bot token",
-            "4. Message @userinfobot to get your chat ID",
-            "5. Add both to .env file",
-        ],
-    },
-    {
-        "name": "discord", "label": "Discord", "emoji": "💬", "color": Fore.MAGENTA,
-        "send": send_discord_message, "verify": verify_discord_config,
-        "fields": [
-            {"key": "DISCORD_WEBHOOK_URL", "prompt": "Webhook URL", "secret": False, "mask": True},
-        ],
-        "display_extra": [],
-        "setup": [
-            "1. Go to your Discord server",
-            "2. Edit Channel → Integrations → Webhooks",
-            "3. Create New Webhook and copy the URL",
-            "4. Add DISCORD_WEBHOOK_URL to .env file",
-        ],
-    },
-    {
-        "name": "pushover", "label": "Pushover", "emoji": "📲", "color": Fore.YELLOW,
-        "send": send_pushover_message, "verify": verify_pushover_config,
-        "fields": [
-            {"key": "PUSHOVER_USER_KEY",  "prompt": "User Key",  "secret": False, "mask": True},
-            {"key": "PUSHOVER_API_TOKEN", "prompt": "API Token", "secret": False, "mask": True},
-        ],
-        "display_extra": [],
-        "setup": [
-            "1. Go to https://pushover.net",
-            "2. Create an account and note your User Key",
-            "3. Create an Application to get an API Token",
-            "4. Add both to .env file",
-        ],
-    },
-    {
-        "name": "email", "label": "Gmail", "emoji": "📧", "color": Fore.RED,
-        "send": send_email_message, "verify": verify_email_config,
-        "fields": [
-            {"key": "EMAIL_SENDER",    "prompt": "Sender Email",    "secret": False, "mask": True},
-            {"key": "EMAIL_PASSWORD",  "prompt": "App Password",    "secret": True,  "mask": True},
-            {"key": "EMAIL_RECIPIENT", "prompt": "Recipient Email", "secret": False, "mask": True},
-        ],
-        "display_extra": [("EMAIL_SMTP_SERVER", "smtp.gmail.com"), ("EMAIL_SMTP_PORT", "587")],
-        "setup": [
-            "1. Go to Google Account → Security",
-            "2. Enable 2-Step Verification",
-            "3. Go to App Passwords → Generate one for 'Mail'",
-            "4. Use that password (NOT your regular password)",
-            "5. Add all EMAIL_* variables to .env file",
-        ],
-    },
-]
-
-
-def _channel_configured(ch) -> bool:
-    """True when every required env field for this channel is set."""
-    return all(os.getenv(f["key"]) for f in ch["fields"])
-
-
-def _is_transient(resp: str) -> bool:
-    """Heuristic: is this failure worth retrying?
-
-    Retry network blips, timeouts, 5xx and 429. Do NOT retry a missing-config
-    skip or a hard 4xx (bad token / forbidden) — those won't fix themselves
-    inside a few seconds and would just delay the other channels.
-    """
-    if not resp:
-        return False
-    r = resp.lower()
-    if "missing" in r:
-        return False
-    if "http 429" in r or "http 5" in r:
-        return True
-    if "http 4" in r:                      # 4xx other than 429 → permanent
-        return False
-    # No HTTP code → transport-level error (timeout, conn reset, DNS, SMTP)
-    return True
-
-
-def _deliver(chan, message, subject=None, retries=2, backoff=1.5):
-    """Send through one channel with bounded retry on transient failures.
-
-    The single chokepoint for delivery so retry/backoff lives in exactly one
-    place. Only the email sender takes a subject; everything else ignores it.
-    Returns (ok, response) — response is from the final attempt.
-    """
-    send = chan["send"]
-
-    def _attempt():
-        if chan["name"] == "email" and subject is not None:
-            return send(message, subject=subject)
-        return send(message)
-
-    ok, resp = _attempt()
-    attempt = 1
-    while not ok and attempt <= retries and _is_transient(resp):
-        delay = backoff * attempt
-        logging.warning("Channel %s failed (%s) — retry %d/%d in %.1fs",
-                         chan["name"], resp, attempt, retries, delay)
-        time.sleep(delay)
-        ok, resp = _attempt()
-        attempt += 1
-    return ok, resp
-
-# ── Heartbeat ──────────────────────────────────────────────────────────────────
-
-def send_heartbeat():
-    """Send a heartbeat ping to all configured services with enriched system info."""
-    now  = _now_in_tz()
-    host = socket.gethostname()
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
-        s.close()
-    except Exception:
-        ip = "unknown"
-
-    msg = (
-        f"💓 Heartbeat — {now.strftime('%Y-%m-%d %H:%M')} ({_tz_label()})\n"
-        f"🖥️ {host} | 🌐 {ip} | 🐍 Python {platform.python_version()}"
-    )
-    logging.info("Heartbeat: %s", msg)
-
-    _notify = getattr(notification, "notify", None) if notification is not None else None
-    if NOTIFICATIONS_AVAILABLE and callable(_notify):
-        try:
-            _notify(title="💓 Heartbeat", message="Notifier is running", timeout=5)
-        except Exception:
-            pass
-
-    # Check whether any external service is configured
-    any_configured = any(_channel_configured(ch) for ch in CHANNELS)
-
-    if not any_configured:
-        db_log(None, "heartbeat", "LOGGED", "No services configured — heartbeat logged only")
-        logging.info("Heartbeat logged only — no notification services configured")
-        return
-
-    _cprint(f"{Fore.MAGENTA}💓 Sending heartbeat...{Style.RESET_ALL}")
-    for chan in CHANNELS:
-        fn, ch = chan["send"], chan["name"]
-        ok, resp = fn(msg)
-        status = "SUCCESS" if ok else ("SKIPPED" if "Missing" in resp else "FAILED")
-        db_log(None, f"heartbeat_{ch}", status, resp)
+_CLI_CHANNEL_EXTRAS = {
+    "telegram": {"color": Fore.BLUE,    "verify": verify_telegram_config},
+    "discord":  {"color": Fore.MAGENTA, "verify": verify_discord_config},
+    "pushover": {"color": Fore.YELLOW,  "verify": verify_pushover_config},
+    "email":    {"color": Fore.RED,     "verify": verify_email_config},
+}
+for _chan in CHANNELS:
+    _chan.update(_CLI_CHANNEL_EXTRAS.get(_chan["name"], {"color": Fore.WHITE}))
 
 # ── Admin notification ─────────────────────────────────────────────────────────
 
@@ -1098,76 +651,6 @@ def edit_notification():
     db_log(int(notif_id), "system", "EDITED", f"Updated ID {notif_id}")
     print(f"{Fore.GREEN}✅ Updated notification ID {notif_id}!{Style.RESET_ALL}")
 
-# ── Send notifications (epoch-based, db_log, ≥1-success logic) ────────────────
-
-def send_notifications(verbose=False, only_id=None):
-    """Deliver due notifications. With only_id, force-send that one regardless
-    of its due time / sent flag (used by 'send now for ID' and --send-id)."""
-    now_ts = int(time.time())
-    with get_db() as conn:
-        c = conn.cursor()
-        if only_id is not None:
-            c.execute(
-                "SELECT id, message, due_ts, recurrence, repeat_time"
-                " FROM notifications WHERE id = ?",
-                (only_id,),
-            )
-        else:
-            c.execute(
-                "SELECT id, message, due_ts, recurrence, repeat_time"
-                " FROM notifications WHERE sent=0 AND due_ts <= ?",
-                (now_ts,),
-            )
-        pending = c.fetchall()
-
-        if not pending:
-            if verbose:
-                msg = (f"❌ No notification with ID {only_id}." if only_id is not None
-                       else "⚠️  No due notifications right now.")
-                _cprint(f"{Fore.YELLOW}{msg}{Style.RESET_ALL}")
-            return
-
-        for nid, msg, orig_due_ts, recurrence, repeat_time in pending:
-            _cprint(f"{Fore.GREEN}{Style.BRIGHT}📢 Sending: {msg}{Style.RESET_ALL}")
-
-            # Desktop notification
-            _notify = getattr(notification, "notify", None) if notification is not None else None
-            if NOTIFICATIONS_AVAILABLE and callable(_notify):
-                try:
-                    _notify(title="⏰ Reminder!", message=msg, timeout=10)
-                except Exception:
-                    pass
-
-            any_success = False
-            full_msg    = f"⏰ Reminder: {msg}"
-
-            for chan in CHANNELS:
-                ok, resp = _deliver(chan, full_msg, subject="⏰ Reminder")
-                status = "SUCCESS" if ok else ("SKIPPED" if "Missing" in resp else "FAILED")
-                db_log(nid, chan["name"], status, resp)
-                if ok:
-                    any_success = True
-
-            if any_success:
-                c.execute("UPDATE notifications SET sent=1 WHERE id=?", (nid,))
-                if recurrence:
-                    next_ts = _next_recurrence_ts(orig_due_ts, recurrence, repeat_time)
-                    if next_ts:
-                        next_due_str = _from_ts(next_ts).strftime("%Y-%m-%d %H:%M")
-                        c.execute(
-                            "INSERT INTO notifications (message, due_time, due_ts, recurrence, repeat_time)"
-                            " VALUES (?, ?, ?, ?, ?)",
-                            (msg, next_due_str, next_ts, recurrence, repeat_time),
-                        )
-                        _cprint(f"{Fore.CYAN}🔁 Next {recurrence}: {next_due_str}{Style.RESET_ALL}")
-                conn.commit()
-                _cprint(f"{Fore.GREEN}✅ ID {nid} marked sent.{Style.RESET_ALL}")
-            else:
-                conn.commit()
-                _cprint(f"{Fore.RED}❌ ID {nid} not marked sent — no channel succeeded.{Style.RESET_ALL}")
-
-        _cprint(f"{Fore.GREEN}✅ Processed {len(pending)} notification(s).{Style.RESET_ALL}")
-
 # ── Logs ───────────────────────────────────────────────────────────────────────
 
 def show_logs(limit=100):
@@ -1618,19 +1101,19 @@ def _get_app_version() -> str:
 def background_runner():
     """Daemon thread — runs scheduled notification checks and heartbeat.
 
-    Scheduled jobs run with _QUIET on so their sender output never scrambles
+    Scheduled jobs run in quiet mode so their sender output never scrambles
     the interactive menu the user may be sitting in; it still hits the log
-    file and the audit DB.
+    file and the audit DB. Quiet mode is owned by the shared engine, so we
+    toggle it through set_quiet_mode() rather than a local flag.
     """
-    global _QUIET
     while True:
         try:
-            _QUIET = True
+            set_quiet_mode(True)
             schedule.run_pending()
         except Exception as exc:
             logging.exception("Scheduler error: %s", exc)
         finally:
-            _QUIET = False
+            set_quiet_mode(False)
         time.sleep(60)
 
 # ── Scheduler setup (shared by interactive + daemon) ──────────────────────────

@@ -11,10 +11,12 @@ Both `notifier.py` and `web/main.py` should import from here.
 
 from __future__ import annotations
 
+import calendar
 import os
 import sqlite3
+import time
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -229,6 +231,27 @@ def _from_ts(ts: int) -> datetime:
     return datetime.fromtimestamp(ts, tz).replace(tzinfo=None)
 
 
+def _relative_due(due_ts: int) -> str:
+    """Human 'in 3h 12m' / 'overdue 5h' / 'due now' from an absolute epoch."""
+    if not due_ts:
+        return ""
+    delta = int(due_ts) - int(time.time())
+    overdue = delta < 0
+    secs = abs(delta)
+    if secs < 60:
+        return "due now"
+    d, rem = divmod(secs, 86400)
+    h, rem = divmod(rem, 3600)
+    m, _ = divmod(rem, 60)
+    if d:
+        body = f"{d}d {h}h" if h else f"{d}d"
+    elif h:
+        body = f"{h}h {m}m" if m else f"{h}h"
+    else:
+        body = f"{m}m"
+    return f"overdue {body}" if overdue else f"in {body}"
+
+
 # ---------------------------------------------------------------------------
 # Time sync mode (NTP/Server vs Local PC / Browser)
 # ---------------------------------------------------------------------------
@@ -268,3 +291,79 @@ def to_epoch(dt: datetime, browser_tz: str | None = None) -> int:
 
     # Server / NTP mode (or fallback)
     return _to_ts(dt)
+
+
+# ---------------------------------------------------------------------------
+# Date parsing & recurrence math (shared between CLI and Web UI)
+# ---------------------------------------------------------------------------
+
+def _parse_due_time(due_str: str) -> Optional[datetime]:
+    """Parse a due-time string into a naive datetime.
+
+    Supports both YYYY-MM-DD and MM-DD-YYYY, with or without seconds.
+    Returns None if nothing matches.
+    """
+    if not due_str:
+        return None
+    for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S",
+                "%m-%d-%Y %H:%M", "%m-%d-%Y %H:%M:%S"):
+        try:
+            return datetime.strptime(due_str, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def _next_daily_time(time_str: str) -> Optional[datetime]:
+    """Return the next future datetime for a daily HH:MM schedule (in TIMEZONE)."""
+    try:
+        h, m = map(int, time_str.split(':'))
+    except (ValueError, AttributeError):
+        return None
+    now = _now_in_tz()
+    candidate = now.replace(hour=h, minute=m, second=0, microsecond=0)
+    if candidate <= now:
+        candidate += timedelta(days=1)
+    return candidate
+
+
+def _next_month_dt(dt: datetime) -> datetime:
+    """Return the same day next calendar month, clamped to the last valid day."""
+    month = dt.month + 1
+    year = dt.year
+    if month > 12:
+        month = 1
+        year += 1
+    day = min(dt.day, calendar.monthrange(year, month)[1])
+    return dt.replace(year=year, month=month, day=day)
+
+
+def _next_recurrence_ts(due_ts: int, recurrence: str,
+                        repeat_time: Optional[str] = None) -> Optional[int]:
+    """Compute the next due_ts for a recurring notification. Rolls forward if past.
+
+    Returns None when the recurrence type is unknown or has no next occurrence.
+    """
+    now_ts = int(time.time())
+
+    if recurrence == "daily" and repeat_time:
+        next_dt = _next_daily_time(repeat_time)
+        return _to_ts(next_dt) if next_dt else None
+
+    if recurrence == "monthly":
+        next_dt = _next_month_dt(_from_ts(due_ts))
+        next_ts = _to_ts(next_dt)
+        while next_ts <= now_ts:
+            next_dt = _next_month_dt(next_dt)
+            next_ts = _to_ts(next_dt)
+        return next_ts
+
+    steps = {"daily": 86400, "weekly": 604800, "biweekly": 1209600}
+    step = steps.get(recurrence, 0)
+    if not step:
+        return None
+
+    next_ts = due_ts + step
+    while next_ts <= now_ts:
+        next_ts += step
+    return next_ts

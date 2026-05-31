@@ -1,130 +1,146 @@
 """
-Notification delivery layer.
+Notification delivery layer — the single source of truth for sending.
 
-This module contains the logic for:
-- Sending messages through different channels (Telegram, Discord, etc.)
-- The core `send_notifications()` function that finds due reminders and delivers them.
+Both the CLI (`notifier.py`) and the FastAPI web UI import from here:
+- Channel senders (Telegram, Discord, Pushover, Gmail)
+- The channel registry (`CHANNELS`)
+- Bounded retry/backoff delivery (`_deliver`)
+- The audit-log writer (`db_log`)
+- The core scheduler entry point (`send_notifications`) with recurrence
+- The multi-channel heartbeat (`send_heartbeat`)
 
-Both the CLI (`notifier.py`) and the web UI can import from here.
+Credentials resolve DB-first (set via the web UI) then fall back to environment
+variables (the classic `.env` method used by the CLI), so both front-ends work
+against the same delivery code.
 """
 
 from __future__ import annotations
 
-import os
-import time
 import logging
+import os
+import platform
+import smtplib
+import socket
+import sys
+import time
 from datetime import datetime
-from typing import Any
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from typing import Any, Optional
 
 import requests
 
-from .db import get_db, init_db, get_setting, set_setting
+from .db import (
+    get_db,
+    get_setting,
+    set_setting,
+    _from_ts,
+    _next_recurrence_ts,
+    _now_in_tz,
+    _tz_label,
+)
+
+# Optional desktop toasts (plyer). Absent/headless environments degrade quietly.
+try:
+    from plyer import notification as _desktop  # type: ignore
+except Exception:  # pragma: no cover - plyer not installed (e.g. web container)
+    _desktop = None
+
+# On headless Linux (no DISPLAY/WAYLAND_DISPLAY) plyer shells out to notify-send
+# and fails with a GDBus error — disable desktop toasts there.
+if _desktop is not None and sys.platform.startswith("linux"):
+    if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+        _desktop = None
 
 # ---------------------------------------------------------------------------
-# Logging setup (used by both CLI and web container)
+# Logging
 # ---------------------------------------------------------------------------
 logger = logging.getLogger("notifier.notifications")
 
+
 def configure_logging(level: int = logging.INFO):
-    """Call this once at startup (web lifespan or CLI)."""
+    """Attach a stream handler once (used by the web lifespan and CLI)."""
     if not logger.handlers:
         handler = logging.StreamHandler()
-        formatter = logging.Formatter(
-            "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
+        handler.setFormatter(
+            logging.Formatter("%(asctime)s | %(levelname)s | %(name)s | %(message)s")
         )
-        handler.setFormatter(formatter)
         logger.addHandler(handler)
         logger.setLevel(level)
         logger.propagate = False
     return logger
 
+
 # ---------------------------------------------------------------------------
-# Quiet mode for when running inside web container (no terminal spam)
+# Quiet mode — suppress sender chatter while a background scheduler is running
+# so it never scrambles an interactive CLI menu (or spams web container logs).
 # ---------------------------------------------------------------------------
 _QUIET = False
 
-def set_quiet_mode(quiet: bool):
+
+def set_quiet_mode(quiet: bool) -> None:
     global _QUIET
     _QUIET = quiet
 
 
-# ---------------------------------------------------------------------------
-# Credential Management (supports both .env and Database via web UI)
-# ---------------------------------------------------------------------------
-
-def _get_credential(channel: str, key: str) -> str:
-    """
-    Get a credential for a channel.
-    Priority: Database setting > Environment variable
-    """
-    # Try database first (set via web UI)
-    db_key = f"{channel}_{key}".lower()
-    value = get_setting(db_key)
-    if value:
-        return value
-
-    # Fallback to environment variable (traditional .env method)
-    env_key = f"{channel.upper()}_{key.upper()}"
-    return os.getenv(env_key, "")
-
-
-def get_channel_credentials(channel_name: str) -> dict:
-    """Return all configured credentials for a given channel."""
-    creds = {}
-    channel = next((c for c in CHANNELS if c["name"] == channel_name), None)
-    if not channel:
-        return creds
-
-    for field in channel.get("fields", []):
-        key = field["key"].replace(f"{channel_name.upper()}_", "")
-        creds[key] = _get_credential(channel_name, key)
-
-    return creds
-
-
-def set_channel_credential(channel_name: str, key: str, value: str) -> None:
-    """Save a credential for a channel into the database."""
-    db_key = f"{channel_name}_{key}".lower()
-    set_setting(db_key, value)
-
-
-def _cprint(*args, **kwargs):
+def _cprint(*args, **kwargs) -> None:
     if not _QUIET:
         print(*args, **kwargs)
 
 
 # ---------------------------------------------------------------------------
-# Channel Senders
+# Credential resolution: Database (web UI) first, then environment (.env)
+# ---------------------------------------------------------------------------
+
+def _get_credential(channel: str, key: str) -> str:
+    """Resolve one credential. Priority: DB setting > environment variable."""
+    db_key = f"{channel}_{key}".lower()
+    value = get_setting(db_key)
+    if value:
+        return value
+    env_key = f"{channel.upper()}_{key.upper()}"
+    return os.getenv(env_key, "")
+
+
+def get_channel_credentials(channel_name: str) -> dict:
+    """Return all configured credentials for a channel (keys without the prefix)."""
+    creds: dict[str, str] = {}
+    channel = next((c for c in CHANNELS if c["name"] == channel_name), None)
+    if not channel:
+        return creds
+    for field in channel.get("fields", []):
+        key = field["key"].replace(f"{channel_name.upper()}_", "")
+        creds[key] = _get_credential(channel_name, key)
+    return creds
+
+
+def set_channel_credential(channel_name: str, key: str, value: str) -> None:
+    """Persist a credential for a channel into the database (web UI path)."""
+    set_setting(f"{channel_name}_{key}".lower(), value)
+
+
+# ---------------------------------------------------------------------------
+# Channel senders — all return (ok: bool, response: str)
+#
+# Failure responses are normalized to "HTTP <code> - <body>" (or "Missing ...")
+# so `_is_transient` can classify them for retry. Do not change that contract
+# without updating `_is_transient`.
 # ---------------------------------------------------------------------------
 
 def send_telegram_message(message: str) -> tuple[bool, str]:
     bot_token = _get_credential("telegram", "bot_token")
     chat_id = _get_credential("telegram", "chat_id")
-
     if not bot_token or not chat_id:
-        missing = []
-        if not bot_token:
-            missing.append("TELEGRAM_BOT_TOKEN")
-        if not chat_id:
-            missing.append("TELEGRAM_CHAT_ID")
-        msg = f"Missing {', '.join(missing)} in .env or database"
-        logger.warning(msg)
-        return False, msg
-
+        return False, "Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID"
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     try:
         r = requests.post(url, json={"chat_id": chat_id, "text": message}, timeout=10)
         if r.status_code == 200:
-            logger.info("Telegram message sent successfully")
             _cprint("✅ Telegram message sent!")
-            return True, "Sent successfully"
-        else:
-            error_msg = f"Telegram API error {r.status_code}: {r.text[:300]}"
-            logger.error(error_msg)
-            return False, error_msg
+            return True, f"HTTP {r.status_code}"
+        return False, f"HTTP {r.status_code} - {r.text[:300]}"
     except requests.exceptions.RequestException as e:
-        logger.error(f"Telegram request failed: {e}")
-        return False, f"Network error: {str(e)}"
+        return False, str(e)
 
 
 def send_discord_message(message: str) -> tuple[bool, str]:
@@ -136,14 +152,14 @@ def send_discord_message(message: str) -> tuple[bool, str]:
         if r.status_code in (200, 204):
             _cprint("✅ Discord message sent!")
             return True, f"HTTP {r.status_code}"
-        return False, f"HTTP {r.status_code} - {r.text}"
+        return False, f"HTTP {r.status_code} - {r.text[:300]}"
     except requests.exceptions.RequestException as e:
         return False, str(e)
 
 
 def send_pushover_message(message: str) -> tuple[bool, str]:
-    user_key = os.getenv('PUSHOVER_USER_KEY')
-    api_token = os.getenv('PUSHOVER_API_TOKEN')
+    user_key = _get_credential("pushover", "user_key")
+    api_token = _get_credential("pushover", "api_token")
     if not user_key or not api_token:
         return False, "Missing PUSHOVER_USER_KEY or PUSHOVER_API_TOKEN"
     url = "https://api.pushover.net/1/messages.json"
@@ -154,148 +170,280 @@ def send_pushover_message(message: str) -> tuple[bool, str]:
         if r.status_code == 200:
             _cprint("✅ Pushover message sent!")
             return True, f"HTTP {r.status_code}"
-        return False, f"HTTP {r.status_code} - {r.text}"
+        return False, f"HTTP {r.status_code} - {r.text[:300]}"
     except requests.exceptions.RequestException as e:
         return False, str(e)
 
 
-def send_email_message(message: str, subject: str = "⏰ Reminder") -> tuple[bool, str]:
-    # Simplified version - full implementation is in the original notifier.py
-    # For now we return not implemented so it doesn't break
-    return False, "Email sending not yet moved to shared module"
-
-
-# ---------------------------------------------------------------------------
-# Channel Registry (used by both CLI and web)
-# ---------------------------------------------------------------------------
-
-CHANNELS: list[dict[str, Any]] = [
-    {
-        "name": "telegram",
-        "label": "Telegram",
-        "emoji": "📱",
-        "send": send_telegram_message,
-        "fields": [
-            {"key": "TELEGRAM_BOT_TOKEN", "prompt": "Bot Token"},
-            {"key": "TELEGRAM_CHAT_ID", "prompt": "Chat ID"},
-        ],
-    },
-    {
-        "name": "discord",
-        "label": "Discord",
-        "emoji": "💬",
-        "send": send_discord_message,
-        "fields": [
-            {"key": "DISCORD_WEBHOOK_URL", "prompt": "Webhook URL"},
-        ],
-    },
-    # Pushover and Email can be added here later
-]
-
-
-def _channel_configured(channel: dict) -> bool:
-    for field in channel.get("fields", []):
-        if not os.getenv(field["key"]):
-            return False
-    return True
-
-
-# ---------------------------------------------------------------------------
-# Core Delivery Logic
-# ---------------------------------------------------------------------------
-
-def _deliver(channel: dict, message: str, subject: str | None = None) -> tuple[bool, str]:
-    """Deliver message through one channel."""
-    send_func = channel["send"]
+def send_email_message(message: str, subject: str = "⏰ Notification Reminder") -> tuple[bool, str]:
+    smtp_server = _get_credential("email", "smtp_server") or "smtp.gmail.com"
+    smtp_port = int(_get_credential("email", "smtp_port") or "587")
+    sender = _get_credential("email", "sender")
+    password = _get_credential("email", "password")
+    recipient = _get_credential("email", "recipient")
+    if not all([sender, password, recipient]):
+        return False, "Missing EMAIL_SENDER or EMAIL_PASSWORD or EMAIL_RECIPIENT"
     try:
-        if channel["name"] == "email" and subject:
-            return send_func(message, subject=subject)
-        return send_func(message)
+        msg = MIMEMultipart()
+        msg["From"] = sender
+        msg["To"] = recipient
+        msg["Subject"] = subject
+        msg.attach(MIMEText(message, "plain"))
+        server = smtplib.SMTP(smtp_server, smtp_port, timeout=20)
+        server.starttls()
+        server.login(sender, password)
+        server.send_message(msg)
+        server.quit()
+        _cprint("✅ Email sent!")
+        return True, "Email sent"
     except Exception as e:
         return False, str(e)
 
 
-def send_notifications(verbose: bool = False, only_id: int | None = None) -> None:
+# ---------------------------------------------------------------------------
+# Channel registry — single source of truth for delivery.
+#
+# `secret`/`mask`/`display_extra` are presentation hints consumed by the CLI;
+# the web UI ignores keys it doesn't use. No Fore/colour here so this module
+# stays importable in a headless web container without colorama.
+# ---------------------------------------------------------------------------
+
+CHANNELS: list[dict[str, Any]] = [
+    {
+        "name": "telegram", "label": "Telegram", "emoji": "📱",
+        "send": send_telegram_message,
+        "fields": [
+            {"key": "TELEGRAM_BOT_TOKEN", "prompt": "Bot Token", "secret": False, "mask": True},
+            {"key": "TELEGRAM_CHAT_ID", "prompt": "Chat ID", "secret": False, "mask": False},
+        ],
+        "display_extra": [],
+        "setup": [
+            "1. Message @BotFather on Telegram",
+            "2. Send /newbot and follow instructions",
+            "3. Get your bot token",
+            "4. Message @userinfobot to get your chat ID",
+            "5. Add both to .env file",
+        ],
+    },
+    {
+        "name": "discord", "label": "Discord", "emoji": "💬",
+        "send": send_discord_message,
+        "fields": [
+            {"key": "DISCORD_WEBHOOK_URL", "prompt": "Webhook URL", "secret": False, "mask": True},
+        ],
+        "display_extra": [],
+        "setup": [
+            "1. Go to your Discord server",
+            "2. Edit Channel → Integrations → Webhooks",
+            "3. Create New Webhook and copy the URL",
+            "4. Add DISCORD_WEBHOOK_URL to .env file",
+        ],
+    },
+    {
+        "name": "pushover", "label": "Pushover", "emoji": "📲",
+        "send": send_pushover_message,
+        "fields": [
+            {"key": "PUSHOVER_USER_KEY", "prompt": "User Key", "secret": False, "mask": True},
+            {"key": "PUSHOVER_API_TOKEN", "prompt": "API Token", "secret": False, "mask": True},
+        ],
+        "display_extra": [],
+        "setup": [
+            "1. Go to https://pushover.net",
+            "2. Create an account and note your User Key",
+            "3. Create an Application to get an API Token",
+            "4. Add both to .env file",
+        ],
+    },
+    {
+        "name": "email", "label": "Gmail", "emoji": "📧",
+        "send": send_email_message,
+        "fields": [
+            {"key": "EMAIL_SENDER", "prompt": "Sender Email", "secret": False, "mask": True},
+            {"key": "EMAIL_PASSWORD", "prompt": "App Password", "secret": True, "mask": True},
+            {"key": "EMAIL_RECIPIENT", "prompt": "Recipient Email", "secret": False, "mask": True},
+        ],
+        "display_extra": [("EMAIL_SMTP_SERVER", "smtp.gmail.com"), ("EMAIL_SMTP_PORT", "587")],
+        "setup": [
+            "1. Go to Google Account → Security",
+            "2. Enable 2-Step Verification",
+            "3. Go to App Passwords → Generate one for 'Mail'",
+            "4. Use that password (NOT your regular password)",
+            "5. Add all EMAIL_* variables to .env file",
+        ],
+    },
+]
+
+
+def _channel_configured(chan: dict) -> bool:
+    """True when every required credential for this channel resolves (DB or env)."""
+    creds = get_channel_credentials(chan["name"])
+    return bool(creds) and all(creds.values())
+
+
+# ---------------------------------------------------------------------------
+# Audit log
+# ---------------------------------------------------------------------------
+
+def db_log(notification_id: Optional[int], channel: str, status: str,
+           response: Optional[str] = None) -> None:
+    """Write one send-attempt record to the logs table (and the logger)."""
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        with get_db() as conn:
+            c = conn.cursor()
+            c.execute(
+                "INSERT INTO logs (notification_id, timestamp, channel, status, response)"
+                " VALUES (?, ?, ?, ?, ?)",
+                (notification_id, ts, channel, status, (response or "")[:500]),
+            )
+            conn.commit()
+        logger.info("%s | %s | %s | nid=%s | %s", ts, channel, status, notification_id, response)
+    except Exception as exc:
+        logger.error("db_log failed: %s", exc)
+
+
+# ---------------------------------------------------------------------------
+# Bounded retry / backoff delivery
+# ---------------------------------------------------------------------------
+
+def _is_transient(resp: str) -> bool:
+    """Heuristic: is this failure worth retrying?
+
+    Retry network blips, timeouts, 5xx and 429. Do NOT retry a missing-config
+    skip or a hard 4xx (bad token / forbidden) — those won't self-heal in a few
+    seconds and would just delay the other channels.
     """
-    Main function that finds due notifications and delivers them.
-    Called by APScheduler every minute (and manually via CLI).
+    if not resp:
+        return False
+    r = resp.lower()
+    if "missing" in r:
+        return False
+    if "http 429" in r or "http 5" in r:
+        return True
+    if "http 4" in r:            # 4xx other than 429 → permanent
+        return False
+    return True                 # no HTTP code → transport-level error
+
+
+def _deliver(chan: dict, message: str, subject: Optional[str] = None,
+             retries: int = 2, backoff: float = 1.5) -> tuple[bool, str]:
+    """Send through one channel with bounded retry on transient failures.
+
+    The single chokepoint for delivery so retry/backoff lives in one place.
+    Only the email sender takes a subject; everything else ignores it.
+    Returns (ok, response) from the final attempt.
+    """
+    send = chan["send"]
+
+    def _attempt():
+        if chan["name"] == "email" and subject is not None:
+            return send(message, subject=subject)
+        return send(message)
+
+    ok, resp = _attempt()
+    attempt = 1
+    while not ok and attempt <= retries and _is_transient(resp):
+        delay = backoff * attempt
+        logger.warning("Channel %s failed (%s) — retry %d/%d in %.1fs",
+                       chan["name"], resp, attempt, retries, delay)
+        time.sleep(delay)
+        ok, resp = _attempt()
+        attempt += 1
+    return ok, resp
+
+
+# ---------------------------------------------------------------------------
+# Core scheduler entry point
+# ---------------------------------------------------------------------------
+
+def _desktop_notify(title: str, message: str) -> None:
+    notify = getattr(_desktop, "notify", None) if _desktop is not None else None
+    if callable(notify):
+        try:
+            notify(title=title, message=message, timeout=10)
+        except Exception:
+            pass
+
+
+def send_notifications(verbose: bool = False, only_id: Optional[int] = None) -> None:
+    """Deliver due notifications.
+
+    With ``only_id`` set, force-send that one regardless of its due time / sent
+    flag (used by 'send now for ID' and --send-id). A notification is marked
+    sent when at least one channel succeeds; recurring ones are re-armed for
+    their next occurrence.
     """
     now_ts = int(time.time())
-
     with get_db() as conn:
         c = conn.cursor()
-
         if only_id is not None:
             c.execute(
-                "SELECT id, message, due_ts, recurrence, repeat_time FROM notifications WHERE id = ?",
+                "SELECT id, message, due_ts, recurrence, repeat_time"
+                " FROM notifications WHERE id = ?",
                 (only_id,),
             )
         else:
             c.execute(
-                "SELECT id, message, due_ts, recurrence, repeat_time "
-                "FROM notifications WHERE sent = 0 AND due_ts <= ? "
-                "ORDER BY due_ts ASC",
+                "SELECT id, message, due_ts, recurrence, repeat_time"
+                " FROM notifications WHERE sent = 0 AND due_ts <= ?"
+                " ORDER BY due_ts ASC",
                 (now_ts,),
             )
-
         pending = c.fetchall()
 
         if not pending:
+            if verbose:
+                msg = (f"❌ No notification with ID {only_id}." if only_id is not None
+                       else "⚠️  No due notifications right now.")
+                _cprint(msg)
             return
 
-        logger.info(f"Found {len(pending)} due notification(s) to send")
+        logger.info("Found %d due notification(s) to send", len(pending))
 
         for row in pending:
-            nid, msg, orig_due_ts, recurrence, repeat_time = row
+            nid, msg, orig_due_ts, recurrence, repeat_time = (
+                row["id"], row["message"], row["due_ts"], row["recurrence"], row["repeat_time"]
+            )
+            _cprint(f"📢 Sending: {msg}")
+            _desktop_notify("⏰ Reminder!", msg)
+
             full_msg = f"⏰ Reminder: {msg}"
-
-            logger.info(f"Processing reminder #{nid}: {msg[:80]}...")
-
             any_success = False
-
             for chan in CHANNELS:
-                ok, resp = _deliver(chan, full_msg)
-
+                ok, resp = _deliver(chan, full_msg, subject="⏰ Reminder")
                 status = "SUCCESS" if ok else ("SKIPPED" if "Missing" in resp else "FAILED")
-
-                # Always log the attempt
-                log_message = f"Reminder #{nid} → {chan['name']}: {status} ({resp})"
-                if ok:
-                    logger.info(log_message)
-                else:
-                    logger.warning(log_message)
-
-                # Write to DB logs table
-                try:
-                    ts = datetime.utcnow().isoformat()
-                    c.execute(
-                        "INSERT INTO logs (notification_id, timestamp, channel, status, response) "
-                        "VALUES (?, ?, ?, ?, ?)",
-                        (nid, ts, chan["name"], status, resp[:500]),
-                    )
-                except Exception as db_err:
-                    logger.error(f"Failed to write log for reminder #{nid}: {db_err}")
-
+                db_log(nid, chan["name"], status, resp)
                 if ok:
                     any_success = True
 
             if any_success:
-                c.execute("UPDATE notifications SET sent=1 WHERE id=?", (nid,))
-                logger.info(f"Reminder #{nid} marked as sent")
+                c.execute("UPDATE notifications SET sent = 1 WHERE id = ?", (nid,))
+                if recurrence:
+                    next_ts = _next_recurrence_ts(orig_due_ts, recurrence, repeat_time)
+                    if next_ts:
+                        next_due_str = _from_ts(next_ts).strftime("%Y-%m-%d %H:%M")
+                        c.execute(
+                            "INSERT INTO notifications"
+                            " (message, due_time, due_ts, recurrence, repeat_time)"
+                            " VALUES (?, ?, ?, ?, ?)",
+                            (msg, next_due_str, next_ts, recurrence, repeat_time),
+                        )
+                        _cprint(f"🔁 Next {recurrence}: {next_due_str}")
+                conn.commit()
+                _cprint(f"✅ ID {nid} marked sent.")
             else:
-                logger.error(f"Reminder #{nid} failed on all channels")
+                conn.commit()
+                _cprint(f"❌ ID {nid} not marked sent — no channel succeeded.")
 
-            # TODO: Add recurrence handling here (copy from original notifier.py when needed)
-            conn.commit()
+        if verbose:
+            _cprint(f"✅ Processed {len(pending)} notification(s).")
 
 
 # ---------------------------------------------------------------------------
-# Heartbeat
+# Heartbeat — pings every configured channel
 # ---------------------------------------------------------------------------
 
-def get_local_ip():
-    """Get local IP address (works inside Docker too)."""
-    import socket
+def _local_ip() -> str:
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(("8.8.8.8", 80))
@@ -305,46 +453,24 @@ def get_local_ip():
     except Exception:
         return "unknown"
 
-def get_external_ip():
-    """Get public/external IP."""
-    try:
-        r = requests.get("https://api.ipify.org", timeout=5)
-        if r.status_code == 200:
-            return r.text.strip()
-    except Exception:
-        pass
-    return "unknown"
 
-def send_heartbeat():
-    """Send a system heartbeat to Telegram (if configured)."""
-    bot_token = _get_credential("telegram", "bot_token")
-    chat_id = _get_credential("telegram", "chat_id")
+def send_heartbeat() -> None:
+    """Send a heartbeat ping to every configured channel with system info."""
+    now = _now_in_tz()
+    host = socket.gethostname()
+    msg = (
+        f"💓 Heartbeat — {now.strftime('%Y-%m-%d %H:%M')} ({_tz_label()})\n"
+        f"🖥️ {host} | 🌐 {_local_ip()} | 🐍 Python {platform.python_version()}"
+    )
+    logger.info("Heartbeat: %s", msg)
+    _desktop_notify("💓 Heartbeat", "Notifier is running")
 
-    if not bot_token or not chat_id:
-        logger.debug("Heartbeat skipped — Telegram not configured")
+    if not any(_channel_configured(ch) for ch in CHANNELS):
+        db_log(None, "heartbeat", "LOGGED", "No services configured — heartbeat logged only")
         return
 
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    local_ip = get_local_ip()
-    external_ip = get_external_ip()
-
-    # In Docker this will show the container path
-    file_location = os.getenv("HEARTBEAT_FILE_LOCATION", "/app (running in Docker)")
-
-    message = (
-        f"❤️ Notifier Heartbeat\n\n"
-        f"📅 Timestamp: {timestamp}\n"
-        f"🌐 Local IP: {local_ip}\n"
-        f"🌐 External IP: {external_ip}\n"
-        f"📁 File Location: {file_location}"
-    )
-
-    try:
-        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-        r = requests.post(url, json={"chat_id": chat_id, "text": message}, timeout=10)
-        if r.status_code == 200:
-            logger.info("Heartbeat sent successfully to Telegram")
-        else:
-            logger.warning(f"Heartbeat failed to send: HTTP {r.status_code}")
-    except Exception as e:
-        logger.error(f"Failed to send heartbeat: {e}")
+    _cprint("💓 Sending heartbeat...")
+    for chan in CHANNELS:
+        ok, resp = chan["send"](msg)
+        status = "SUCCESS" if ok else ("SKIPPED" if "Missing" in resp else "FAILED")
+        db_log(None, f"heartbeat_{chan['name']}", status, resp)
