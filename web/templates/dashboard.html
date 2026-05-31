@@ -24,53 +24,48 @@
                     <!-- Current Version Badge (always visible in top nav) -->
                     <span id="app-version-badge"
                           class="text-[10px] font-mono px-2 py-0.5 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-400">
-                        {% if version %}v{{ version }}{% else %}v2.2.0{% endif %}
+                        {% if version %}v{{ version }}{% else %}v2.4.0{% endif %}
                     </span>
                 </div>
             </div>
 
-            <!-- TEMPORARY DEBUG MARKER - REMOVE AFTER YOU SEE IT -->
-            <div class="bg-red-600 text-white text-center text-xs py-1 font-bold tracking-wider">
-                NEW BUILD 28 MAY 2026 — Time Sync + Version Badge + Top Nav Button Added
-            </div>
-
-            <div class="flex items-center gap-4">
+            <div class="flex items-center gap-2 sm:gap-3">
                 <!-- Live Date & Time - ALWAYS VISIBLE with strong page colors -->
                 <div id="top-nav-datetime" 
-                     class="flex items-center gap-2 font-mono text-sm px-4 py-1.5 bg-emerald-950 border-2 border-emerald-600/80 rounded-2xl text-emerald-200 shadow-inner">
+                     class="flex items-center gap-1.5 font-mono text-xs sm:text-sm px-3 sm:px-4 py-1 sm:py-1.5 bg-emerald-950 border-2 border-emerald-600/80 rounded-2xl text-emerald-200 shadow-inner">
                     <i class="fa-regular fa-clock text-emerald-400"></i>
                     <span id="top-nav-datetime-text" class="font-bold tracking-tighter"></span>
                 </div>
 
                 <!-- Colorful Action Buttons in Top Nav -->
                 <button onclick="showAddModal()"
-                        class="flex items-center gap-2 px-4 py-1.5 text-sm font-semibold rounded-2xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 transition-all text-white shadow-sm">
+                        class="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-1.5 text-xs sm:text-sm font-semibold rounded-2xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 transition-all text-white shadow-sm min-h-[40px]">
                     <i class="fa-solid fa-plus"></i>
-                    <span class="hidden sm:inline">Add Reminder</span>
+                    <span class="hidden sm:inline">Add</span>
                 </button>
 
                 <button onclick="testTelegram()"
-                        class="flex items-center gap-2 px-3 py-1.5 text-sm rounded-2xl bg-sky-600 hover:bg-sky-500 active:bg-sky-700 transition-all text-white">
+                        class="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm rounded-2xl bg-sky-600 hover:bg-sky-500 active:bg-sky-700 transition-all text-white min-h-[40px]">
                     <i class="fa-brands fa-telegram"></i>
                     <span class="hidden md:inline">Test</span>
                 </button>
 
-                <!-- Quick access to Time Settings (visible even if sidebar is hidden) -->
+                <!-- Quick access to Time Settings -->
                 <button onclick="showConfigView('time')"
-                        class="flex items-center gap-2 px-3 py-1.5 text-sm rounded-2xl bg-violet-600 hover:bg-violet-500 active:bg-violet-700 transition-all text-white"
-                        title="Time & Date Sync (NTP vs Local PC)">
+                        class="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm rounded-2xl bg-violet-600 hover:bg-violet-500 active:bg-violet-700 transition-all text-white min-h-[40px]"
+                        title="Time & Date Sync">
                     <i class="fa-solid fa-clock"></i>
-                    <span class="hidden md:inline">Time Sync</span>
+                    <span class="hidden md:inline">Time</span>
                 </button>
 
-                <div class="flex items-center gap-2 text-sm text-zinc-400 pl-2 border-l border-zinc-800">
+                <div class="flex items-center gap-1.5 text-xs sm:text-sm text-zinc-400 pl-2 border-l border-zinc-800">
                     <i class="fa-solid fa-user-circle"></i>
                     <span class="hidden sm:inline">{{ user }}</span>
                 </div>
 
                 <form action="/logout" method="post">
                     <button type="submit"
-                            class="flex items-center gap-2 px-3 py-1.5 text-sm rounded-2xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white transition-colors">
+                            class="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm rounded-2xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white transition-colors min-h-[40px]">
                         <i class="fa-solid fa-sign-out-alt"></i>
                         <span class="hidden md:inline">Sign out</span>
                     </button>
@@ -180,13 +175,13 @@
                                         {% endif %}
                                     </div>
                                 </div>
-                                <div class="flex gap-1 ml-4">
+                                <div class="flex gap-1 ml-2 sm:ml-4">
                                     <button onclick="editReminder({{ r.id }})"
-                                            class="text-zinc-500 hover:text-emerald-400 p-2">
+                                            class="text-zinc-500 hover:text-emerald-400 p-2.5 sm:p-2 min-w-[40px] min-h-[40px] flex items-center justify-center">
                                         <i class="fa-solid fa-edit"></i>
                                     </button>
                                     <button onclick="deleteReminder({{ r.id }}, this)"
-                                            class="text-zinc-500 hover:text-red-400 p-2">
+                                            class="text-zinc-500 hover:text-red-400 p-2.5 sm:p-2 min-w-[40px] min-h-[40px] flex items-center justify-center">
                                         <i class="fa-solid fa-trash"></i>
                                     </button>
                                 </div>
@@ -300,10 +295,10 @@
                 <h1 class="text-3xl font-semibold mb-2">Time &amp; Date Sync</h1>
                 <p class="text-zinc-400 mb-8">Choose how reminder times you enter are interpreted.</p>
 
-                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 max-w-5xl">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 max-w-5xl">
                     <!-- Server / NTP Mode -->
                     <div onclick="selectTimeMode('server')"
-                         class="time-mode-card cursor-pointer border-2 border-emerald-600 bg-zinc-900 rounded-3xl p-6 transition-all"
+                         class="time-mode-card cursor-pointer border-2 border-emerald-600 bg-zinc-900 rounded-3xl p-5 sm:p-6 transition-all"
                          id="mode-card-server">
                         <div class="flex items-start gap-4">
                             <div class="w-12 h-12 rounded-2xl bg-emerald-600/20 flex items-center justify-center flex-shrink-0">
@@ -331,7 +326,7 @@
 
                     <!-- Local PC / Browser Mode -->
                     <div onclick="selectTimeMode('local')"
-                         class="time-mode-card cursor-pointer border-2 border-zinc-700 hover:border-sky-500 bg-zinc-900 rounded-3xl p-6 transition-all"
+                         class="time-mode-card cursor-pointer border-2 border-zinc-700 hover:border-sky-500 bg-zinc-900 rounded-3xl p-5 sm:p-6 transition-all"
                          id="mode-card-local">
                         <div class="flex items-start gap-4">
                             <div class="w-12 h-12 rounded-2xl bg-sky-600/20 flex items-center justify-center flex-shrink-0">
@@ -384,7 +379,7 @@
                 Auth is {% if auth_enabled %}enabled{% else %}disabled (dev mode){% endif %}. 
                 Logged in as <span class="font-mono">{{ user }}</span>.
                 <span class="mx-2 text-zinc-700">•</span>
-                v{% if version %}{{ version }}{% else %}2.2.0{% endif %}
+                v{% if version %}{{ version }}{% else %}2.4.0{% endif %}
             </div>
         </div>
     </div>
@@ -602,15 +597,15 @@
                 }
 
                 let html = `
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-left">
+                    <div class="overflow-x-auto -mx-1">
+                        <table class="w-full text-left min-w-[520px]">
                             <thead>
                                 <tr class="border-b border-zinc-700 text-xs text-zinc-400">
-                                    <th class="pb-2 pr-4">Time</th>
-                                    <th class="pb-2 pr-4">Reminder</th>
-                                    <th class="pb-2 pr-4">Channel</th>
-                                    <th class="pb-2 pr-4">Status</th>
-                                    <th class="pb-2 pr-4 w-10"></th>
+                                    <th class="pb-2 pr-3">Time</th>
+                                    <th class="pb-2 pr-3">Reminder</th>
+                                    <th class="pb-2 pr-3">Channel</th>
+                                    <th class="pb-2 pr-3">Status</th>
+                                    <th class="pb-2 pr-2 w-8"></th>
                                 </tr>
                             </thead>
                             <tbody>
