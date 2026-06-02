@@ -1,3 +1,5 @@
+<div align="center">
+
 # Notifier
 
 [![Tests](https://github.com/trickdaddy24/notifier/actions/workflows/tests.yml/badge.svg)](https://github.com/trickdaddy24/notifier/actions/workflows/tests.yml)
@@ -6,6 +8,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 A Python tool for scheduling and delivering reminders across multiple notification platforms — Telegram, Discord, Pushover, and Gmail — with a SQLite-backed scheduler, audit logging, JSON import/export, an optional Tkinter GUI, an integrated version management system, and an **optional FastAPI web dashboard**.
+
+</div>
 
 ## Table of Contents
 
