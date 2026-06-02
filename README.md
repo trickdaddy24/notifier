@@ -2,9 +2,24 @@
 
 [![Tests](https://github.com/trickdaddy24/notifier/actions/workflows/tests.yml/badge.svg)](https://github.com/trickdaddy24/notifier/actions/workflows/tests.yml)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Version](https://img.shields.io/badge/version-2.5.0-8A4DFF.svg)](CHANGELOG.md)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-A Python CLI tool for scheduling and delivering reminders across multiple notification platforms — Telegram, Discord, Pushover, and Gmail — with a SQLite-backed scheduler, audit logging, JSON import/export, an optional Tkinter GUI, and an integrated version management system.
+A Python tool for scheduling and delivering reminders across multiple notification platforms — Telegram, Discord, Pushover, and Gmail — with a SQLite-backed scheduler, audit logging, JSON import/export, an optional Tkinter GUI, an integrated version management system, and an **optional FastAPI web dashboard**.
+
+## Table of Contents
+
+- [Features](#features)
+- [Architecture](#architecture)
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [Usage](#usage)
+- [Project Structure](#project-structure)
+- [Deployment](#deployment)
+- [Backup & Recovery](#backup--recovery)
+- [Roadmap](#roadmap)
+- [Version History](#version-history)
+- [License](#license)
 
 ## Features
 
@@ -22,6 +37,47 @@ A Python CLI tool for scheduling and delivering reminders across multiple notifi
 - **Timezone support** — configure any IANA timezone; all due-time inputs and scheduler comparisons use it
 - **Configurable heartbeat** — periodic ping to all services at a set interval (hours)
 - **Version management** — built-in release tracker with auto-generated `CHANGELOG.md` (System menu)
+- **Web dashboard (optional)** — a FastAPI + Tailwind browser UI (`web/`) to view/add/manage reminders, password-protected, deployable via Docker/Traefik or as a Cloudflare Pages frontend
+
+---
+
+## Architecture
+
+Two front ends over one SQLite database. The **CLI** (`notifier.py`) is the primary
+interface and runs the background scheduler thread; the optional **web dashboard**
+(`web/`, FastAPI + Tailwind) reads/writes the same `notifications.db`.
+
+```
+                 ┌────────────────────────────────────────────────┐
+   you ─────────▶│  CLI  notifier.py  (menu + scheduler thread)     │
+                 │   • fires due reminders every minute             │
+                 │   • multi-channel send + audit log               │
+                 └───────────────┬──────────────────────────────────┘
+                                 │ shared
+   browser ─HTTPS─▶ Traefik ─▶ ┌─▼──────────────────────────────┐
+   (optional)      / CF Pages   │ web/ (FastAPI + Tailwind)       │
+                                │  • login (NOTIFIER_WEB_PASSWORD)│
+                                │  • dashboard CRUD · /health     │
+                                └─────────────┬───────────────────┘
+                                              │ reads/writes
+                    ┌─────────────────────────▼─────────────────────┐
+                    │ SQLite  notifications.db                       │
+                    │   • notifications (schedule)  • logs (audit)   │
+                    │ version_notes.db  (release history)            │
+                    └───────────────────────┬────────────────────────┘
+                          send  ┌────────────▼──────────────┐
+                                │ Telegram · Discord ·        │
+                                │ Pushover · Gmail · desktop  │
+                                └─────────────────────────────┘
+```
+
+| Component | Role | Where |
+|---|---|---|
+| **CLI** | Menu UI + the scheduler thread that fires due reminders | `notifier.py` (+ `notifier/` package) |
+| **Web** | Optional FastAPI dashboard + auth + `/health` | `web/main.py`, `web/auth.py`, `web/templates/`, `web/static/` |
+| **Senders** | Per-channel delivery, each returns `(bool, str)` for the audit log | inside `notifier.py` |
+| **Data** | Schedule + audit trail; release history | `notifications.db` (`notifications`, `logs`) · `version_notes.db` |
+| **Versioning** | Seed list + DB, auto-generates `CHANGELOG.md` | `version_manager.py` |
 
 ---
 
@@ -416,6 +472,54 @@ CREATE TABLE logs (
 
 ---
 
+## Deployment
+
+The CLI runs anywhere Python does (locally / Windows Task Scheduler / cron). The
+**optional web dashboard** ships two deploy paths:
+
+**Docker + Traefik (Saltbox)** — `docker-compose.yml` builds the `notifier-web` service
+(FastAPI on `:8000`, `/health` healthcheck). No host port is published; Traefik on the
+external `saltbox` network fronts it. State persists via the `./data:/app/data` volume
+(`NOTIFIER_DB_PATH=/app/data/notifications.db`); `.env` is mounted read-only.
+
+```bash
+# on the host
+cp .env.example .env                 # set NOTIFIER_WEB_PASSWORD + channel creds
+docker compose up --build -d
+# standalone (no Traefik): add a `ports: ["8000:8000"]` mapping per the compose comments
+```
+
+**Cloudflare Pages (frontend)** — `wrangler.toml` builds the `web/frontend` bundle for a
+Pages deploy (`npx wrangler pages deploy web/frontend/dist --project-name=notifier-web`);
+a GitHub Actions workflow (`.github/workflows/deploy-frontend.yml`) automates it.
+
+> Required web env: `NOTIFIER_WEB_PASSWORD` (login), `TIMEZONE`, `NOTIFIER_DB_PATH`, plus
+> the notification-channel vars from [Configuration](#configuration).
+
+---
+
+## Backup & Recovery
+
+**All state is two SQLite files** — `notifications.db` (schedule + audit `logs`) and
+`version_notes.db` (release history). Everything else regenerates.
+
+```bash
+# In-app: CLI "Database backup" (menu) writes a timestamped copy.
+# Online-safe snapshot (Docker):
+docker exec notifier-web sqlite3 /app/data/notifications.db \
+  ".backup '/app/data/notifications_$(date +%F).db'"
+# JSON export (portable): use the CLI's JSON export to dump notifications.
+```
+
+**Restore:** stop the app, replace `notifications.db` (in `./data` for Docker) with your
+backup, restart. Schema is created on first run, so an empty/missing DB just starts fresh;
+a JSON export can be re-imported via the CLI.
+
+**Disaster recovery:** re-clone the repo, restore `notifications.db` + `.env`, then run the
+CLI or `docker compose up --build -d`.
+
+---
+
 ## Roadmap
 
 See [ROADMAP.md](ROADMAP.md) for planned major features.
@@ -424,6 +528,20 @@ The most significant upcoming item is **Multi-User Support + Google OAuth** (ope
 
 ---
 
+## Version History
+
+| Version | Date | Highlights |
+|---|---|---|
+| **2.5.0** | 2026-05-31 | Countdown events (ported from cruise-notifier) — an event expands into milestone reminders (60/30/14/7/3/1/0 days) via the existing scheduler; web + CLI events UI. |
+| 2.4.0 | 2026-05-30 | Unified CLI + web onto one delivery engine (fixed web recurrence, email, Pushover); single `__version__` anchor; pytest engine suite. |
+| 2.3.0–2.3.2 | 2026-05-28→29 | Time & Date Sync panel (NTP vs local), version badge in nav, mobile/UI polish. |
+| 2.1.0 | 2026-05-19 | Headless CLI (`--daemon/--send-now/--add/...`), timezone fix, channel registry, retry/backoff, smoke tests. |
+| 2.0.x | 2026-03 | Daily heartbeat default, About-box fixes, modular refactor groundwork. |
+
+See [CHANGELOG.md](CHANGELOG.md) for the full history (auto-generated by `version_manager.py`).
+
+---
+
 ## License
 
-MIT
+[MIT](LICENSE) © Minus One Labs
