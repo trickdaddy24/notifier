@@ -585,6 +585,22 @@
                 </div>
 
                 <div>
+                    <label class="block text-sm text-zinc-400 mb-1.5">Cadence</label>
+                    <div class="flex gap-5 text-sm">
+                        <label class="inline-flex items-center gap-2">
+                            <input type="radio" name="cadence" value="milestones" checked
+                                   onchange="onCadenceChange()" class="accent-sky-600 w-4 h-4">
+                            Milestones
+                        </label>
+                        <label class="inline-flex items-center gap-2">
+                            <input type="radio" name="cadence" value="daily"
+                                   onchange="onCadenceChange()" class="accent-sky-600 w-4 h-4">
+                            Every day 📆
+                        </label>
+                    </div>
+                </div>
+
+                <div id="milestones-field">
                     <label class="block text-sm text-zinc-400 mb-1.5">Milestones <span class="text-zinc-600">(days before, comma-separated)</span></label>
                     <input type="text" name="milestones" id="event-milestones" value="60,30,14,7,3,1,0"
                            class="w-full bg-zinc-950 border border-zinc-800 focus:border-sky-600 rounded-2xl px-4 py-3 text-sm font-mono">
@@ -713,12 +729,24 @@
 
         // === Countdown Events ===
 
+        function setCadence(value) {
+            const radio = document.querySelector(`input[name="cadence"][value="${value}"]`);
+            if (radio) radio.checked = true;
+            onCadenceChange();
+        }
+
+        function onCadenceChange() {
+            const daily = document.querySelector('input[name="cadence"]:checked')?.value === 'daily';
+            document.getElementById('milestones-field').classList.toggle('hidden', daily);
+        }
+
         function showAddEventModal() {
             editingEventId = null;
             const form = document.getElementById('event-form');
             form.reset();
             document.getElementById('event-milestones').value = '60,30,14,7,3,1,0';
             document.getElementById('event-time').value = '09:00';
+            setCadence('milestones');
             document.getElementById('event-modal-title').textContent = 'Add Countdown';
             document.getElementById('event-submit-btn').textContent = 'Add Countdown';
             const modal = document.getElementById('event-modal');
@@ -746,6 +774,7 @@
             document.getElementById('event-cruise').checked = (ev.category === 'cruise');
             document.getElementById('event-details').value = ev.details || '';
             document.getElementById('event-milestones').value = ev.milestones || '60,30,14,7,3,1,0';
+            setCadence(ev.cadence || 'milestones');
             document.getElementById('event-modal-title').textContent = 'Edit Countdown';
             document.getElementById('event-submit-btn').textContent = 'Save Changes';
             const modal = document.getElementById('event-modal');
