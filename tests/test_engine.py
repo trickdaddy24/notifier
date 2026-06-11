@@ -392,3 +392,44 @@ def test_stale_event_ticks_skipped_after_downtime(engine):
         ).fetchone()[0]
     assert stale == 2
     assert unsent == 0, "all three overdue ticks must be retired"
+
+
+def test_stale_skip_groups_per_event_and_keeps_newest(engine):
+    db, N = engine
+    calls = _use_fake_channel(N)
+    e1 = db.create_event("Cruise", _future_date(10), category="cruise",
+                         cadence="daily", send_time="23:59")
+    e2 = db.create_event("Dentist", _future_date(10), cadence="daily", send_time="23:59")
+    # A plain (non-event) overdue reminder must be unaffected by the skip.
+    plain_id = _insert(db, "water the plants", int(time.time()) - 60)
+    now = int(time.time())
+    with db.get_db() as conn:
+        c = conn.cursor()
+        for eid in (e1, e2):
+            ids = [r["id"] for r in c.execute(
+                "SELECT id FROM notifications WHERE event_id = ? ORDER BY due_ts LIMIT 2",
+                (eid,),
+            ).fetchall()]
+            for i, nid in enumerate(ids):
+                c.execute("UPDATE notifications SET due_ts = ? WHERE id = ?",
+                          (now - (2 - i) * 86400, nid))
+        conn.commit()
+
+    N.send_notifications()
+
+    # One survivor per event + the plain reminder = 3 deliveries.
+    assert len(calls) == 3
+    # Survivors are the NEWEST tick of each event (the 9-days-left one, since
+    # the two earliest of 10..0 were backdated and the later of those wins).
+    event_msgs = [m for m in calls if "water the plants" not in m]
+    assert any("9 days until Cruise" in m for m in event_msgs)
+    assert any("9 days until Dentist" in m for m in event_msgs)
+    with db.get_db() as conn:
+        c = conn.cursor()
+        stale = c.execute(
+            "SELECT COUNT(*) FROM logs WHERE status = 'SKIPPED_STALE'").fetchone()[0]
+        plain_stale = c.execute(
+            "SELECT COUNT(*) FROM logs WHERE status = 'SKIPPED_STALE'"
+            " AND notification_id = ?", (plain_id,)).fetchone()[0]
+    assert stale == 2  # one stale tick retired per event
+    assert plain_stale == 0
