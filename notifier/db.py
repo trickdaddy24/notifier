@@ -140,6 +140,7 @@ def init_db(backfill_legacy: bool = True) -> None:
                 details      TEXT DEFAULT NULL,                   -- freeform note (ship, confirmation #, ...)
                 milestones   TEXT NOT NULL DEFAULT '60,30,14,7,3,1,0',  -- CSV of day-offsets before target
                 send_time    TEXT NOT NULL DEFAULT '09:00',       -- HH:MM (local) each milestone fires at
+                cadence      TEXT NOT NULL DEFAULT 'milestones',  -- 'milestones' | 'daily'
                 created_ts   INTEGER NOT NULL DEFAULT 0,
                 active       INTEGER NOT NULL DEFAULT 1
             )
@@ -161,6 +162,15 @@ def init_db(backfill_legacy: bool = True) -> None:
         ]:
             try:
                 c.execute(f"ALTER TABLE notifications ADD COLUMN {col} {definition}")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+
+        # Migrations for older events tables
+        for col, definition in [
+            ("cadence", "TEXT NOT NULL DEFAULT 'milestones'"),
+        ]:
+            try:
+                c.execute(f"ALTER TABLE events ADD COLUMN {col} {definition}")
             except sqlite3.OperationalError:
                 pass  # Column already exists
 
@@ -412,6 +422,18 @@ def _next_recurrence_ts(due_ts: int, recurrence: str,
 # ---------------------------------------------------------------------------
 
 DEFAULT_MILESTONES = "60,30,14,7,3,1,0"
+CADENCE_MILESTONES = "milestones"
+CADENCE_DAILY = "daily"
+CADENCES = (CADENCE_MILESTONES, CADENCE_DAILY)
+DAILY_CADENCE_CAP = 365  # max daily ticks expanded for far-future events
+
+
+def _normalize_cadence(value) -> str:
+    """Coerce any stored/user value to a valid cadence ('milestones' default)."""
+    v = (value or "").strip().lower()
+    return v if v in CADENCES else CADENCE_MILESTONES
+
+
 DEFAULT_EVENT_SEND_TIME = "09:00"
 
 # Migrated from cruise-notifier's cruises.json — seeded on first run only.
@@ -507,7 +529,8 @@ def create_event(title: str, target_date: str,
                  category: Optional[str] = None,
                  details: Optional[str] = None,
                  milestones: Optional[str] = None,
-                 send_time: Optional[str] = None) -> Optional[int]:
+                 send_time: Optional[str] = None,
+                 cadence: Optional[str] = None) -> Optional[int]:
     """Insert a countdown event and expand it into milestone notifications.
 
     Returns the new event id, or None if the date could not be parsed.
@@ -516,6 +539,7 @@ def create_event(title: str, target_date: str,
     if d is None:
         return None
     send_time = (send_time or DEFAULT_EVENT_SEND_TIME).strip()
+    cadence = _normalize_cadence(cadence)
     milestones_csv = ",".join(str(x) for x in _parse_milestones(milestones or DEFAULT_MILESTONES))
     canonical_date = d.strftime("%Y-%m-%d")
     target_dt = _event_target_dt(canonical_date, send_time)
@@ -526,10 +550,10 @@ def create_event(title: str, target_date: str,
         c = conn.cursor()
         c.execute(
             "INSERT INTO events (title, target_date, target_ts, category, details,"
-            " milestones, send_time, created_ts, active)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)",
+            " milestones, send_time, cadence, created_ts, active)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
             (title.strip(), canonical_date, target_ts, category or None,
-             details or None, milestones_csv, send_time, now_ts),
+             details or None, milestones_csv, send_time, cadence, now_ts),
         )
         event_id = c.lastrowid
         conn.commit()
@@ -576,8 +600,8 @@ def update_event(event_id: int, **fields) -> bool:
     """Update an event's editable fields and re-expand its milestones.
 
     Accepts any of: title, target_date, category, details, milestones,
-    send_time, active. Returns False if the event does not exist or a supplied
-    date is invalid.
+    send_time, cadence, active. Returns False if the event does not exist or a
+    supplied date is invalid.
     """
     existing = get_event(event_id)
     if not existing:
@@ -591,6 +615,7 @@ def update_event(event_id: int, **fields) -> bool:
     milestones_csv = ",".join(
         str(x) for x in _parse_milestones(fields.get("milestones", existing["milestones"]))
     )
+    cadence = _normalize_cadence(fields.get("cadence", existing.get("cadence")))
     active = int(fields.get("active", existing["active"]))
 
     d = _parse_event_date(target_date)
@@ -604,9 +629,9 @@ def update_event(event_id: int, **fields) -> bool:
         c = conn.cursor()
         c.execute(
             "UPDATE events SET title=?, target_date=?, target_ts=?, category=?,"
-            " details=?, milestones=?, send_time=?, active=? WHERE id=?",
+            " details=?, milestones=?, send_time=?, cadence=?, active=? WHERE id=?",
             (title.strip(), canonical_date, target_ts, category or None,
-             details or None, milestones_csv, send_time, active, event_id),
+             details or None, milestones_csv, send_time, cadence, active, event_id),
         )
         conn.commit()
 

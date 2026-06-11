@@ -271,3 +271,20 @@ def test_day_of_message_is_celebratory(engine):
     db, _ = engine
     msg = db.format_event_message("Sail Away", 0, "2026-07-12", category="cruise")
     assert "Today is the day" in msg and "🚢" in msg
+
+
+# ── Daily cadence ──────────────────────────────────────────────────────────────
+
+def test_cadence_roundtrip_and_default(engine):
+    db, _ = engine
+    m = db.create_event("A", _future_date(30))
+    d = db.create_event("B", _future_date(30), cadence="daily")
+    bad = db.create_event("C", _future_date(30), cadence="weird")
+    assert db.get_event(m)["cadence"] == "milestones"
+    assert db.get_event(d)["cadence"] == "daily"
+    assert db.get_event(bad)["cadence"] == "milestones"  # unknown -> default
+    # update_event can switch cadence and preserves it when untouched
+    assert db.update_event(d, cadence="milestones")
+    assert db.get_event(d)["cadence"] == "milestones"
+    assert db.update_event(m, title="A2")
+    assert db.get_event(m)["cadence"] == "milestones"
