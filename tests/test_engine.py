@@ -288,3 +288,30 @@ def test_cadence_roundtrip_and_default(engine):
     assert db.get_event(d)["cadence"] == "milestones"
     assert db.update_event(m, title="A2")
     assert db.get_event(m)["cadence"] == "milestones"
+
+
+def test_daily_cadence_expands_one_per_day(engine):
+    db, _ = engine
+    eid = db.create_event("Cruise", _future_date(10), cadence="daily", send_time="23:59")
+    rows = _pending_for_event(db, eid)
+    assert len(rows) == 11  # offsets 10..0 inclusive
+
+
+def test_daily_cadence_event_today_gets_finale_only(engine):
+    db, _ = engine
+    eid = db.create_event("Now", _future_date(0), cadence="daily", send_time="23:59")
+    assert len(_pending_for_event(db, eid)) == 1  # just the day-0 tick
+
+
+def test_daily_cadence_capped_at_365(engine):
+    db, _ = engine
+    eid = db.create_event("Far", _future_date(500), cadence="daily", send_time="23:59")
+    assert len(_pending_for_event(db, eid)) == 366  # offsets 365..0
+
+
+def test_daily_cadence_reexpands_on_edit(engine):
+    db, _ = engine
+    eid = db.create_event("Trip", _future_date(5), cadence="daily", send_time="23:59")
+    assert len(_pending_for_event(db, eid)) == 6
+    assert db.update_event(eid, target_date=_future_date(8))
+    assert len(_pending_for_event(db, eid)) == 9

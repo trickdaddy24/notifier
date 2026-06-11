@@ -655,6 +655,21 @@ def delete_event(event_id: int) -> bool:
     return True
 
 
+def _event_offsets(event: dict) -> list[int]:
+    """Day-offsets to expand for an event, derived per its cadence.
+
+    Daily events compute their range at expansion time (capped at
+    DAILY_CADENCE_CAP), so re-expansion after an edit always yields the
+    correct new run. Milestone events use their stored CSV.
+    """
+    if _normalize_cadence(event.get("cadence")) == CADENCE_DAILY:
+        days_left = days_until(event["target_date"])
+        if days_left is None or days_left < 0:
+            return []
+        return list(range(min(days_left, DAILY_CADENCE_CAP), -1, -1))
+    return _parse_milestones(event["milestones"])
+
+
 def expand_event(event_id: int) -> int:
     """(Re)generate the pending milestone notifications for an event.
 
@@ -668,7 +683,7 @@ def expand_event(event_id: int) -> int:
         return 0
 
     now_ts = int(time.time())
-    offsets = _parse_milestones(event["milestones"])
+    offsets = _event_offsets(event)
     target_dt = _event_target_dt(event["target_date"], event["send_time"])
     if target_dt is None:
         return 0
