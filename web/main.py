@@ -61,7 +61,8 @@ try:
     get_db, init_db, DB_PATH, get_setting, set_setting,
     _to_ts, _now_in_tz, _tz_label, get_time_mode, set_time_mode, to_epoch,
     create_event, list_events, get_event, update_event, delete_event,
-    days_until, _parse_event_date, DEFAULT_MILESTONES, DEFAULT_EVENT_SEND_TIME
+    days_until, _parse_event_date, DEFAULT_MILESTONES, DEFAULT_EVENT_SEND_TIME,
+    CADENCES
 )
 except ImportError:
     # Fallback for when running web/ in isolation (development)
@@ -71,7 +72,8 @@ except ImportError:
     get_db, init_db, DB_PATH, get_setting, set_setting,
     _to_ts, _now_in_tz, _tz_label, get_time_mode, set_time_mode, to_epoch,
     create_event, list_events, get_event, update_event, delete_event,
-    days_until, _parse_event_date, DEFAULT_MILESTONES, DEFAULT_EVENT_SEND_TIME
+    days_until, _parse_event_date, DEFAULT_MILESTONES, DEFAULT_EVENT_SEND_TIME,
+    CADENCES
 )
 
 
@@ -779,6 +781,7 @@ async def api_create_event(
     details: str = Form(""),
     milestones: str = Form(""),
     send_time: str = Form(""),
+    cadence: str = Form(""),
     user: Optional[str] = Depends(get_current_user),
 ):
     if user is None:
@@ -787,6 +790,8 @@ async def api_create_event(
         return JSONResponse({"error": "Title is required"}, status_code=400)
     if _parse_event_date(target_date) is None:
         return JSONResponse({"error": "Invalid date. Use YYYY-MM-DD or m/d/yy."}, status_code=400)
+    if cadence and cadence not in CADENCES:
+        return JSONResponse({"error": "Invalid cadence"}, status_code=400)
 
     try:
         event_id = create_event(
@@ -795,6 +800,7 @@ async def api_create_event(
             details=(details or None),
             milestones=(milestones or DEFAULT_MILESTONES),
             send_time=(send_time or DEFAULT_EVENT_SEND_TIME),
+            cadence=(cadence or None),
         )
         if event_id is None:
             return JSONResponse({"error": "Could not create event"}, status_code=400)
@@ -815,6 +821,7 @@ async def api_update_event(
     details: str = Form(""),
     milestones: str = Form(""),
     send_time: str = Form(""),
+    cadence: str = Form(""),
     user: Optional[str] = Depends(get_current_user),
 ):
     if user is None:
@@ -823,6 +830,8 @@ async def api_update_event(
         return JSONResponse({"error": "Title is required"}, status_code=400)
     if _parse_event_date(target_date) is None:
         return JSONResponse({"error": "Invalid date. Use YYYY-MM-DD or m/d/yy."}, status_code=400)
+    if cadence and cadence not in CADENCES:
+        return JSONResponse({"error": "Invalid cadence"}, status_code=400)
 
     try:
         ok = update_event(
@@ -830,6 +839,7 @@ async def api_update_event(
             category=(category or None), details=(details or None),
             milestones=(milestones or DEFAULT_MILESTONES),
             send_time=(send_time or DEFAULT_EVENT_SEND_TIME),
+            cadence=(cadence or None),
         )
         if not ok:
             return JSONResponse({"error": "Event not found or invalid"}, status_code=404)
