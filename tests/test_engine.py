@@ -175,8 +175,12 @@ def test_channel_configured_reflects_credentials(engine, monkeypatch):
 # ── Countdown events ───────────────────────────────────────────────────────────
 
 def _future_date(days):
-    from datetime import date, timedelta
-    return (date.today() + timedelta(days=days)).strftime("%Y-%m-%d")
+    # "Today" in the engine's pinned zone (the fixture sets TIMEZONE to
+    # America/Chicago) — host-local date.today() can differ near midnight.
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+    today = datetime.now(ZoneInfo("America/Chicago")).date()
+    return (today + timedelta(days=days)).strftime("%Y-%m-%d")
 
 
 def _pending_for_event(db, event_id):
