@@ -378,13 +378,13 @@ def send_notifications(verbose: bool = False, only_id: Optional[int] = None) -> 
         c = conn.cursor()
         if only_id is not None:
             c.execute(
-                "SELECT id, message, due_ts, recurrence, repeat_time"
+                "SELECT id, message, due_ts, recurrence, repeat_time, event_id"
                 " FROM notifications WHERE id = ?",
                 (only_id,),
             )
         else:
             c.execute(
-                "SELECT id, message, due_ts, recurrence, repeat_time"
+                "SELECT id, message, due_ts, recurrence, repeat_time, event_id"
                 " FROM notifications WHERE sent = 0 AND due_ts <= ?"
                 " ORDER BY due_ts ASC",
                 (now_ts,),
@@ -399,6 +399,38 @@ def send_notifications(verbose: bool = False, only_id: Optional[int] = None) -> 
             return
 
         logger.info("Found %d due notification(s) to send", len(pending))
+
+        # Stale-tick skip: if downtime left several ticks of the same event
+        # overdue (daily cadence especially), deliver only the most current
+        # one and retire the rest quietly — never spam a backlog.
+        if only_id is None:
+            latest_by_event = {}
+            for row in pending:
+                ev_id = row["event_id"]
+                if ev_id is not None:
+                    best = latest_by_event.get(ev_id)
+                    if best is None or row["due_ts"] > best["due_ts"]:
+                        latest_by_event[ev_id] = row
+            stale_ids = {
+                row["id"] for row in pending
+                if row["event_id"] is not None
+                and row["id"] != latest_by_event[row["event_id"]]["id"]
+            }
+            if stale_ids:
+                ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                for sid in stale_ids:
+                    c.execute("UPDATE notifications SET sent = 1 WHERE id = ?", (sid,))
+                    c.execute(
+                        "INSERT INTO logs (notification_id, timestamp, channel, status, response)"
+                        " VALUES (?, ?, ?, ?, ?)",
+                        (sid, ts, "system", "SKIPPED_STALE",
+                         "Outdated countdown tick superseded by a newer one"),
+                    )
+                    logger.info("%s | system | SKIPPED_STALE | nid=%s | "
+                                "Outdated countdown tick superseded by a newer one", ts, sid)
+                conn.commit()
+                logger.info("Skipped %d stale event tick(s)", len(stale_ids))
+                pending = [row for row in pending if row["id"] not in stale_ids]
 
         for row in pending:
             nid, msg, orig_due_ts, recurrence, repeat_time = (

@@ -356,3 +356,39 @@ def test_cruise_message_appends_details_and_noncruise_unchanged(engine):
     assert msg.endswith("\nDeck 9, cabin 9242")
     plain = db.format_event_message("Dentist", 5, "2026-07-12")
     assert plain == "📅 5 days until Dentist on 2026-07-12!"
+
+
+# ── Stale-tick skip after downtime ────────────────────────────────────────────
+
+def test_stale_event_ticks_skipped_after_downtime(engine):
+    db, N = engine
+    calls = _use_fake_channel(N)
+    eid = db.create_event("Cruise", _future_date(10), category="cruise",
+                          cadence="daily", send_time="23:59")
+    # Simulate 3 days of scheduler downtime: backdate the 3 earliest ticks.
+    now = int(time.time())
+    with db.get_db() as conn:
+        c = conn.cursor()
+        ids = [r["id"] for r in c.execute(
+            "SELECT id FROM notifications WHERE event_id = ? ORDER BY due_ts LIMIT 3",
+            (eid,),
+        ).fetchall()]
+        for i, nid in enumerate(ids):
+            c.execute("UPDATE notifications SET due_ts = ? WHERE id = ?",
+                      (now - (3 - i) * 86400, nid))
+        conn.commit()
+
+    N.send_notifications()
+
+    assert len(calls) == 1, "only the most current tick should be delivered"
+    with db.get_db() as conn:
+        c = conn.cursor()
+        stale = c.execute(
+            "SELECT COUNT(*) FROM logs WHERE status = 'SKIPPED_STALE'"
+        ).fetchone()[0]
+        unsent = c.execute(
+            "SELECT COUNT(*) FROM notifications WHERE id IN (?, ?, ?) AND sent = 0",
+            tuple(ids),
+        ).fetchone()[0]
+    assert stale == 2
+    assert unsent == 0, "all three overdue ticks must be retired"
