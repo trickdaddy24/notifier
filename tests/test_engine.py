@@ -315,3 +315,40 @@ def test_daily_cadence_reexpands_on_edit(engine):
     assert len(_pending_for_event(db, eid)) == 6
     assert db.update_event(eid, target_date=_future_date(8))
     assert len(_pending_for_event(db, eid)) == 9
+
+
+# ── Cruise message pack ────────────────────────────────────────────────────────
+
+def test_cruise_pack_has_15_templates(engine):
+    db, _ = engine
+    assert len(db.CRUISE_PACK) == 15
+    for tpl in db.CRUISE_PACK:
+        assert "{days} days until {title}" in tpl
+
+
+def test_cruise_pack_rotation_deterministic(engine):
+    db, _ = engine
+    a = db.format_event_message("Cruise", 17, "2026-07-12", category="cruise")
+    b = db.format_event_message("Cruise", 17, "2026-07-12", category="cruise")
+    adjacent = db.format_event_message("Cruise", 16, "2026-07-12", category="cruise")
+    assert a == b  # same day -> same message
+    assert a != adjacent  # consecutive days differ
+    assert a.startswith(db.CRUISE_PACK[17 % 15].format(days=17, title="Cruise"))
+    assert "17 days until Cruise" in a
+
+
+def test_cruise_tomorrow_and_finale_specials(engine):
+    db, _ = engine
+    one = db.format_event_message("Cruise", 1, "2026-07-12", category="cruise")
+    zero = db.format_event_message("Cruise", 0, "2026-07-12", category="cruise")
+    assert "TOMORROW" in one
+    assert "Today is the day" in zero and "🚢" in zero
+
+
+def test_cruise_message_appends_details_and_noncruise_unchanged(engine):
+    db, _ = engine
+    msg = db.format_event_message("Cruise", 5, "2026-07-12",
+                                  category="cruise", details="Deck 9, cabin 9242")
+    assert msg.endswith("\nDeck 9, cabin 9242")
+    plain = db.format_event_message("Dentist", 5, "2026-07-12")
+    assert plain == "📅 5 days until Dentist on 2026-07-12!"

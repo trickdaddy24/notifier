@@ -499,27 +499,66 @@ def days_until(target_date: str) -> Optional[int]:
     return (d - _now_in_tz().date()).days
 
 
+# Rotating cruise countdown flavour. Every template keeps the literal phrase
+# "{days} days until {title}" so countdown info survives the jokes; selection
+# is days_left % 15 (deterministic, consecutive days never repeat).
+CRUISE_PACK = [
+    "🚢💨 {days} days until {title}! The ship is warming up its horn... ⚓😤",
+    "🍹⏳ {days} days until {title}! The umbrella drinks are already chilling. 🧊",
+    "🌊🛳️ {days} days until {title}! The ocean said it's saving you a spot. 🤙",
+    "🧳😱 {days} days until {title}! Started packing yet? (We both know.) 👀",
+    "☀️🕶️ {days} days until {title}! Sunscreen: buy two. Trust us. 🧴",
+    "🦞🍤 {days} days until {title}! The buffet has NO idea what's coming. 😈",
+    "⚓😎 {days} days until {title}! Start practicing your captain wave. 👋",
+    "🎰🛳️ {days} days until {title}! Sea air is basically free money. 🤑",
+    "🐬✨ {days} days until {title}! The dolphins have been notified. 📣",
+    "🛏️🌊 {days} days until {title}! Soon your hardest choice is pool or nap. 🏊",
+    "📅🚢 {days} days until {title}! Your out-of-office is begging to be written. 📨",
+    "🍕🍦 {days} days until {title}! Calories don't count in international waters. 🌐",
+    "🌅🥂 {days} days until {title}! Sunset deck toasts incoming. 🌇",
+    "🧭🗺️ {days} days until {title}! Adventure is plotting a course to you. 🚀",
+    "🎶🛳️ {days} days until {title}! Cue the boarding-day playlist. 🎧",
+]
+CRUISE_TOMORROW = "😱🚢 TOMORROW is the day — {title}! Set every alarm. All of them. ⏰⏰⏰"
+CRUISE_FINALE = "🎉🚢 Today is the day — {title}! Bon voyage! 🍹🌊"
+
+
+def _friendly_date(target_date: str) -> str:
+    """'2026-08-15' -> 'Aug 15' (falls back to the raw string)."""
+    d = _parse_event_date(target_date)
+    return f"{d.strftime('%b')} {d.day}" if d else target_date
+
+
 def format_event_message(title: str, days_left: int, target_date: str,
                          category: Optional[str] = None,
                          details: Optional[str] = None) -> str:
     """Human countdown message for one milestone.
 
     `days_left` is the milestone offset (60, 30, ... 0). Cruise events get a
-    nautical flavour; everything else gets a neutral calendar style.
+    rotating pack of 15 nautical-flavoured templates (selected by days_left % 15)
+    with special tomorrow and day-of messages; everything else gets a neutral
+    calendar style.
     """
     cruise = (category or "").lower() == "cruise"
-    icon = "🚢" if cruise else "📅"
 
-    if days_left > 1:
-        body = f"{days_left} days until {title} on {target_date}"
-    elif days_left == 1:
-        body = f"Tomorrow is the day — {title} on {target_date}"
-    else:
-        body = f"Today is the day — {title} on {target_date}"
-
-    msg = f"{icon} {body}!"
     if cruise:
-        msg += " Bon voyage! 🌊" if days_left == 0 else " Anchors aweigh! ⚓"
+        if days_left > 1:
+            msg = (CRUISE_PACK[days_left % len(CRUISE_PACK)]
+                   .format(days=days_left, title=title)
+                   + f" ({_friendly_date(target_date)})")
+        elif days_left == 1:
+            msg = CRUISE_TOMORROW.format(title=title)
+        else:
+            msg = CRUISE_FINALE.format(title=title)
+    else:
+        if days_left > 1:
+            body = f"{days_left} days until {title} on {target_date}"
+        elif days_left == 1:
+            body = f"Tomorrow is the day — {title} on {target_date}"
+        else:
+            body = f"Today is the day — {title} on {target_date}"
+        msg = f"📅 {body}!"
+
     if details:
         msg += f"\n{details}"
     return msg
