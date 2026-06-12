@@ -138,6 +138,9 @@ SEED_VERSIONS = [
     ("024", "2.1.0",
      "Headless + reliability release. Fixed: startup admin alert / GUI title / fallback hardcoded to v2.0.0 (now read live); timezone bug where naive datetime.timestamp() assumed the machine clock instead of TIMEZONE (new _to_ts/_from_ts, all scheduling math routed through them); background scheduler stdout scrambling the interactive menu (new _QUIET/_cprint, jobs run quiet). Added: headless CLI — --daemon, --send-now, --send-id, --snooze/--minutes, --add/--due/--repeat/--at, --list, --version (interactive menu still the no-arg default); UTF-8 stdout/stderr + log guard so emoji/box glyphs no longer crash piped/Task-Scheduler runs; channel registry (CHANNELS) collapsing the 4x duplicated send/verify/menu/credential code into one generic path; bounded retry/backoff on transient send failures via _deliver/_is_transient; pre-update DB+.env backup before git reset --hard; relative due times in the list; HEARTBEAT_ENABLED (legacy HEARTBEAT_INTERVAL still honored); send-by-id / snooze from the Send-Due menu. Added test_notifier_smoke.py (32 checks).",
      "2026-05-19 12:00:00"),
+    ("025", "2.6.0",
+     "Daily countdown cadence for events (new cadence column, 365-tick daily mode); 15-template cruise message pack (days_left % 15, deterministic); stale-tick skip in delivery engine (SKIPPED_STALE audit log); cadence radio in web event modal + CLI Events menu; site favicon (bell + red badge).",
+     "2026-06-12 12:00:00"),
 ]
 
 

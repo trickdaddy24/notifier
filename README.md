@@ -4,7 +4,7 @@
 
 [![Tests](https://github.com/trickdaddy24/notifier/actions/workflows/tests.yml/badge.svg)](https://github.com/trickdaddy24/notifier/actions/workflows/tests.yml)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
-[![Version](https://img.shields.io/badge/version-2.5.0-8A4DFF.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-2.6.0-8A4DFF.svg)](CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 A Python tool for scheduling and delivering reminders across multiple notification platforms — Telegram, Discord, Pushover, and Gmail — with a SQLite-backed scheduler, audit logging, JSON import/export, an optional Tkinter GUI, an integrated version management system, and an **optional FastAPI web dashboard**.
@@ -536,7 +536,8 @@ The most significant upcoming item is **Multi-User Support + Google OAuth** (ope
 
 | Version | Date | Highlights |
 |---|---|---|
-| **2.5.0** | 2026-05-31 | Countdown events (ported from cruise-notifier) — an event expands into milestone reminders (60/30/14/7/3/1/0 days) via the existing scheduler; web + CLI events UI. |
+| **2.6.0** | 2026-06-12 | Daily countdown cadence + cruise message pack + stale-tick skip + favicon. |
+| 2.5.0 | 2026-05-31 | Countdown events (ported from cruise-notifier) — an event expands into milestone reminders (60/30/14/7/3/1/0 days) via the existing scheduler; web + CLI events UI. |
 | 2.4.0 | 2026-05-30 | Unified CLI + web onto one delivery engine (fixed web recurrence, email, Pushover); single `__version__` anchor; pytest engine suite. |
 | 2.3.0–2.3.2 | 2026-05-28→29 | Time & Date Sync panel (NTP vs local), version badge in nav, mobile/UI polish. |
 | 2.1.0 | 2026-05-19 | Headless CLI (`--daemon/--send-now/--add/...`), timezone fix, channel registry, retry/backoff, smoke tests. |
