@@ -80,6 +80,7 @@ from notifier.db import (
     create_event, list_events, get_event, update_event, delete_event,
     days_until, _parse_event_date, _parse_milestones,
     DEFAULT_MILESTONES, DEFAULT_EVENT_SEND_TIME,
+    CADENCE_DAILY, CADENCE_MILESTONES,
 )
 from notifier.notifications import (
     CHANNELS, db_log, _channel_configured, _is_transient, _deliver,
@@ -799,7 +800,9 @@ def events_menu():
                       f"{icon} {Fore.WHITE}{Style.BRIGHT}{ev['title']}{Style.RESET_ALL}  "
                       f"{Fore.WHITE}{Style.DIM}{ev['target_date']}{Style.RESET_ALL}  "
                       f"[{_event_days_label(ev['days_left'])}{Fore.WHITE}{Style.DIM}]{Style.RESET_ALL}")
-                print(f"     {Fore.WHITE}{Style.DIM}milestones: {ev['milestones']}  "
+                schedule = ("every day 📆" if (ev.get("cadence") or "") == CADENCE_DAILY
+                            else f"milestones: {ev['milestones']}")
+                print(f"     {Fore.WHITE}{Style.DIM}{schedule}  "
                       f"at {ev['send_time']}  •  {pending} upcoming ping(s){Style.RESET_ALL}")
         else:
             print(f"  {Fore.YELLOW}⚠️  No events yet. Add a cruise, trip, or any date to count down to.{Style.RESET_ALL}")
@@ -835,11 +838,15 @@ def _add_event_interactive():
 
     details = input(f"  {Fore.YELLOW}▶  Details (ship, confirmation #, optional): {Style.RESET_ALL}").strip() or None
 
-    ms_raw = input(f"  {Fore.YELLOW}▶  Milestones in days-before (Enter for '{DEFAULT_MILESTONES}'): {Style.RESET_ALL}").strip()
-    milestones = ms_raw or DEFAULT_MILESTONES
-    if not _parse_milestones(milestones):
-        print(f"{Fore.RED}❌ No valid milestones. Using default.{Style.RESET_ALL}")
-        milestones = DEFAULT_MILESTONES
+    daily = _prompt("Notify every day until the event? (y/N): ").lower() == "y"
+    cadence = CADENCE_DAILY if daily else CADENCE_MILESTONES
+    milestones = DEFAULT_MILESTONES
+    if not daily:
+        ms_raw = input(f"  {Fore.YELLOW}▶  Milestones in days-before (Enter for '{DEFAULT_MILESTONES}'): {Style.RESET_ALL}").strip()
+        milestones = ms_raw or DEFAULT_MILESTONES
+        if not _parse_milestones(milestones):
+            print(f"{Fore.RED}❌ No valid milestones. Using default.{Style.RESET_ALL}")
+            milestones = DEFAULT_MILESTONES
 
     time_raw = input(f"  {Fore.YELLOW}▶  Time of day to notify ({_tz_label()}, Enter for '{DEFAULT_EVENT_SEND_TIME}'): {Style.RESET_ALL}").strip()
     send_time = time_raw or DEFAULT_EVENT_SEND_TIME
@@ -850,7 +857,7 @@ def _add_event_interactive():
         send_time = DEFAULT_EVENT_SEND_TIME
 
     event_id = create_event(title, date_raw, category=category, details=details,
-                            milestones=milestones, send_time=send_time)
+                            milestones=milestones, send_time=send_time, cadence=cadence)
     if event_id is None:
         print(f"{Fore.RED}❌ Could not create event.{Style.RESET_ALL}")
         return
@@ -886,10 +893,13 @@ def _edit_event_interactive():
     details = input(f"  {Fore.YELLOW}▶  Details [{ev['details'] or ''}]: {Style.RESET_ALL}").strip()
     details = details if details else ev["details"]
     ms_raw = input(f"  {Fore.YELLOW}▶  Milestones [{ev['milestones']}]: {Style.RESET_ALL}").strip() or ev["milestones"]
+    current_cadence = ev.get("cadence") or CADENCE_MILESTONES
+    cad_raw = input(f"  {Fore.YELLOW}▶  Cadence (milestones/daily) [{current_cadence}]: {Style.RESET_ALL}").strip().lower()
+    cadence = cad_raw if cad_raw in (CADENCE_MILESTONES, CADENCE_DAILY) else current_cadence
     time_raw = input(f"  {Fore.YELLOW}▶  Send time [{ev['send_time']}]: {Style.RESET_ALL}").strip() or ev["send_time"]
 
     ok = update_event(int(eid), title=title, target_date=date_raw, details=details,
-                      milestones=ms_raw, send_time=time_raw)
+                      milestones=ms_raw, send_time=time_raw, cadence=cadence)
     if ok:
         db_log(None, "system", "EVENT_EDITED", f"Updated event #{eid}")
         print(f"{Fore.GREEN}✅ Event #{eid} updated and milestones rescheduled.{Style.RESET_ALL}")
