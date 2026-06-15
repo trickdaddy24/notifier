@@ -486,13 +486,51 @@ def _local_ip() -> str:
         return "unknown"
 
 
+def _remote_ip() -> str:
+    try:
+        r = requests.get("https://api.ipify.org", timeout=5)
+        return r.text.strip()
+    except Exception:
+        return "unknown"
+
+
+def _db_ok() -> bool:
+    try:
+        with get_db() as conn:
+            conn.execute("SELECT 1")
+        return True
+    except Exception:
+        return False
+
+
 def send_heartbeat() -> None:
     """Send a heartbeat ping to every configured channel with system info."""
     now = _now_in_tz()
-    host = socket.gethostname()
+
+    services_lines: list[str] = []
+    for ch in CHANNELS:
+        ok = _channel_configured(ch)
+        icon = "✅" if ok else "⚠️"
+        label = "configured" if ok else "not configured"
+        services_lines.append(f"  {icon} {ch['name']} — {label}")
+    db_icon = "✅" if _db_ok() else "❌"
+    db_label = "ok" if db_icon == "✅" else "error"
+    services_lines.append(f"  {db_icon} database (sqlite) — {db_label}")
+
+    uname = platform.uname()
+    os_str = f"{uname.system} {uname.release} ({uname.machine})"
+
     msg = (
-        f"💓 Heartbeat — {now.strftime('%Y-%m-%d %H:%M')} ({_tz_label()})\n"
-        f"🖥️ {host} | 🌐 {_local_ip()} | 🐍 Python {platform.python_version()}"
+        f"💓 Notifier Heartbeat — {now.strftime('%Y-%m-%d')} ({_tz_label()})\n\n"
+        f"Services:\n" + "\n".join(services_lines) + "\n\n"
+        f"Network:\n"
+        f"  Remote IP: {_remote_ip()}\n"
+        f"  Local IP: {_local_ip()}\n\n"
+        f"System:\n"
+        f"  OS: {os_str}\n"
+        f"  Host: {socket.gethostname()}\n"
+        f"  Python: {platform.python_version()}\n"
+        f"  Time: {now.strftime('%Y-%m-%d %H:%M:%S')} ({_tz_label()})"
     )
     logger.info("Heartbeat: %s", msg)
     _desktop_notify("💓 Heartbeat", "Notifier is running")

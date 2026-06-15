@@ -141,6 +141,9 @@ SEED_VERSIONS = [
     ("025", "2.6.0",
      "Daily countdown cadence for events (new cadence column, 365-tick daily mode); 15-template cruise message pack (days_left % 15, deterministic); stale-tick skip in delivery engine (SKIPPED_STALE audit log); cadence radio in web event modal + CLI Events menu; site favicon (bell + red badge).",
      "2026-06-12 12:00:00"),
+    ("026", "2.6.1",
+     "Structured heartbeat message — Services (channel configured status + sqlite ok/error), Network (remote IP via ipify + local IP), System (OS, host, Python, timestamp). Added _remote_ip() and _db_ok() helpers.",
+     "2026-06-15 12:00:00"),
 ]
 
 
