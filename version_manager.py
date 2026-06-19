@@ -144,6 +144,9 @@ SEED_VERSIONS = [
     ("026", "2.6.1",
      "Structured heartbeat message — Services (channel configured status + sqlite ok/error), Network (remote IP via ipify + local IP), System (OS, host, Python, timestamp). Added _remote_ip() and _db_ok() helpers.",
      "2026-06-15 12:00:00"),
+    ("027", "2.6.2",
+     "Fix recurring countdown messages always showing the creation-time days count. Recurrence inserts now recompute the message from the event's target_date so daily ticks say '22 days', '21 days', etc. instead of repeating '30 days' forever. event_id is also carried forward on recurrence inserts.",
+     "2026-06-19 12:00:00"),
 ]
 
 

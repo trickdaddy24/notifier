@@ -32,11 +32,14 @@ import requests
 
 from .db import (
     get_db,
+    get_event,
     get_setting,
     set_setting,
+    format_event_message,
     _from_ts,
     _next_recurrence_ts,
     _now_in_tz,
+    _parse_event_date,
     _tz_label,
 )
 
@@ -433,8 +436,9 @@ def send_notifications(verbose: bool = False, only_id: Optional[int] = None) -> 
                 pending = [row for row in pending if row["id"] not in stale_ids]
 
         for row in pending:
-            nid, msg, orig_due_ts, recurrence, repeat_time = (
-                row["id"], row["message"], row["due_ts"], row["recurrence"], row["repeat_time"]
+            nid, msg, orig_due_ts, recurrence, repeat_time, ev_id = (
+                row["id"], row["message"], row["due_ts"], row["recurrence"],
+                row["repeat_time"], row["event_id"],
             )
             _cprint(f"📢 Sending: {msg}")
             _desktop_notify("⏰ Reminder!", msg)
@@ -454,11 +458,29 @@ def send_notifications(verbose: bool = False, only_id: Optional[int] = None) -> 
                     next_ts = _next_recurrence_ts(orig_due_ts, recurrence, repeat_time)
                     if next_ts:
                         next_due_str = _from_ts(next_ts).strftime("%Y-%m-%d %H:%M")
+                        # Recompute the days count for event-linked recurrences
+                        # so the message stays accurate (e.g. daily countdowns
+                        # never get stuck saying "30 days" forever).
+                        next_msg = msg
+                        if ev_id is not None:
+                            event = get_event(ev_id)
+                            if event:
+                                target_d = _parse_event_date(event["target_date"])
+                                if target_d:
+                                    next_fire_date = _from_ts(next_ts).date()
+                                    actual_days = (target_d - next_fire_date).days
+                                    if actual_days >= 0:
+                                        next_msg = format_event_message(
+                                            event["title"], actual_days,
+                                            event["target_date"],
+                                            event.get("category"),
+                                            event.get("details"),
+                                        )
                         c.execute(
                             "INSERT INTO notifications"
-                            " (message, due_time, due_ts, recurrence, repeat_time)"
-                            " VALUES (?, ?, ?, ?, ?)",
-                            (msg, next_due_str, next_ts, recurrence, repeat_time),
+                            " (message, due_time, due_ts, recurrence, repeat_time, event_id)"
+                            " VALUES (?, ?, ?, ?, ?, ?)",
+                            (next_msg, next_due_str, next_ts, recurrence, repeat_time, ev_id),
                         )
                         _cprint(f"🔁 Next {recurrence}: {next_due_str}")
                 conn.commit()
