@@ -147,6 +147,9 @@ SEED_VERSIONS = [
     ("027", "2.6.2",
      "Fix recurring countdown messages always showing the creation-time days count. Recurrence inserts now recompute the message from the event's target_date so daily ticks say '22 days', '21 days', etc. instead of repeating '30 days' forever. event_id is also carried forward on recurrence inserts.",
      "2026-06-19 12:00:00"),
+    ("028", "2.6.3",
+     "2026 US holidays CLI — new notifier/holidays.py module with 19 holidays (11 federal + 8 observances). Non-interactive: --holidays list|add-all|add-past|add (--holiday-name for fuzzy add). Interactive: main menu option 13 '🎉 Holidays 2026' with numbered table, status badges (upcoming/past/already added), and batch-add. Holidays are added as countdown events so existing milestone scheduler delivers reminders automatically.",
+     "2026-06-19 12:00:00"),
 ]
 
 

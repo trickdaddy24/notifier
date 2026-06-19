@@ -1439,6 +1439,7 @@ def main():
         _opt("11", Fore.WHITE,                   "🖥️ ", "Open GUI (Tkinter)")
         _div()
         _opt("12", Fore.WHITE,                   "⚙️ ", f"System  {Fore.CYAN}[{ver_str}]{Style.RESET_ALL}")
+        _opt("13", Fore.YELLOW + Style.BRIGHT,   "🎉", "Holidays 2026")
         _div()
         _opt(" 0", Fore.RED + Style.DIM,         "🚪", "Exit")
 
@@ -1477,6 +1478,9 @@ def main():
             launch_tkinter_gui()
         elif choice == "12":
             system_menu()
+        elif choice == "13":
+            from notifier.holidays import holidays_menu
+            holidays_menu()
         elif choice == "0":
             print(f"\n  {Fore.GREEN}{Style.BRIGHT}👋  Goodbye!{Style.RESET_ALL}\n")
             send_admin_notification(
@@ -1508,6 +1512,10 @@ def cli():
                    help="Force-send one notification by ID now, then exit.")
     g.add_argument("--snooze", metavar="ID", type=int,
                    help="Push a notification's due time out by --minutes.")
+    g.add_argument("--holidays", metavar="ACTION", nargs="?", const="menu",
+                   help="Manage 2026 holidays. ACTION: list | add-all | add-past | add. "
+                        "Omit ACTION for the interactive menu. "
+                        "Use --holiday-name NAME with 'add'.")
     p.add_argument("--minutes", metavar="N", type=int, default=15,
                    help="Minutes for --snooze (default 15).")
     p.add_argument("--due", metavar="'YYYY-MM-DD HH:MM'",
@@ -1516,6 +1524,8 @@ def cli():
                    help="Make --add recurring.")
     p.add_argument("--at", metavar="HH:MM",
                    help="Time of day for --repeat daily.")
+    p.add_argument("--holiday-name", metavar="NAME",
+                   help="Holiday name for --holidays add (partial match OK, e.g. 'thanks').")
     p.add_argument("--version", action="store_true", help="Print version and exit.")
     args = p.parse_args()
 
@@ -1544,6 +1554,10 @@ def cli():
         init_db()
         ok = create_notification_cli(args.add, args.due, repeat=args.repeat, at=args.at)
         sys.exit(0 if ok else 1)
+    if args.holidays is not None:
+        from notifier.holidays import run_holidays_cli
+        run_holidays_cli(args.holidays, name=args.holiday_name)
+        return
 
     main()
 

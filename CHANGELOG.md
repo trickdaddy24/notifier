@@ -5,7 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [v2.6.1] - 2026-06-15  *(Latest)*
+## [v2.6.3] - 2026-06-19  *(Latest)*
+
+### Added
+
+- **2026 US holidays CLI** (`notifier/holidays.py`) — 19 holidays (11 federal + 8 common observances) with correct 2026 dates including observed dates for weekend holidays. Non-interactive: `--holidays list` (full table with status badges), `--holidays add-all` (all upcoming, skips past + existing), `--holidays add-past` (all including past-dated), `--holidays add --holiday-name NAME` (fuzzy partial-match, e.g. `"thanks"` → Thanksgiving). Holidays are added as countdown events so the existing milestone scheduler delivers reminders at 30/14/7/3/1/0 days automatically. Interactive: main menu option 13 `🎉 Holidays 2026` with numbered table, A/P/N actions, and per-entry add by number. Safe to re-run — existing titles are skipped.
+
+## [v2.6.2] - 2026-06-19
+
+### Fixed
+
+- Recurring countdown event notifications always displayed the days count from when the event was created instead of recalculating for the actual send date. Recurrence inserts now recompute the message from the event's `target_date` so daily ticks correctly say "22 days", "21 days", etc. `event_id` is also carried forward on recurrence inserts.
+
+## [v2.6.1] - 2026-06-15
 
 ### Changed
 
