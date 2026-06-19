@@ -270,6 +270,32 @@
                     </div>
                 </div>
 
+                <!-- 2026 Holidays -->
+                <div class="bg-zinc-900 border border-zinc-800 rounded-3xl p-8 mb-8">
+                    <div class="flex items-center justify-between mb-5">
+                        <h2 class="text-xl font-semibold flex items-center gap-2">
+                            <i class="fa-solid fa-calendar-days text-amber-400"></i> 2026 Holidays
+                        </h2>
+                        <div class="flex items-center gap-2">
+                            <button onclick="addHolidays('add-all')" id="btn-add-all"
+                                    class="px-4 py-2 text-sm bg-amber-600 hover:bg-amber-500 rounded-2xl font-medium flex items-center gap-2 transition-colors">
+                                <i class="fa-solid fa-plus"></i>
+                                <span>Add Upcoming</span>
+                            </button>
+                            <button onclick="loadHolidays()" title="Refresh"
+                                    class="px-3 py-2 text-sm bg-zinc-800 hover:bg-zinc-700 rounded-2xl transition-colors">
+                                <i class="fa-solid fa-sync"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="holidays-status" class="hidden mb-4 px-4 py-2.5 rounded-2xl text-sm font-medium"></div>
+
+                    <div id="holidays-list">
+                        <div class="text-zinc-500 text-sm">Loading holidays…</div>
+                    </div>
+                </div>
+
                 <!-- Recent Activity -->
                 <div>
                     <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
@@ -1268,6 +1294,7 @@
             loadHeartbeatSettings();
             loadChannels();
             loadDashboardStats();
+            loadHolidays();
             startLiveClock();
             refreshVersionBadge();   // always fetch latest version from API (helps with caching)
 
@@ -1478,6 +1505,135 @@
 
         // Make sure we stop the interval when user navigates away from the time view
         // (simple approach: the next loadTimeSettings clears it)
+
+        // =====================================================================
+        // 2026 Holidays Panel
+        // =====================================================================
+
+        async function loadHolidays() {
+            const container = document.getElementById('holidays-list');
+            if (!container) return;
+            container.innerHTML = '<div class="text-zinc-500 text-sm">Loading…</div>';
+
+            try {
+                const res = await fetch('/api/holidays');
+                const data = await res.json();
+                if (!data.holidays) {
+                    container.innerHTML = '<div class="text-red-400 text-sm">Failed to load holidays.</div>';
+                    return;
+                }
+
+                const federal    = data.holidays.filter(h => h.category === 'federal');
+                const observance = data.holidays.filter(h => h.category !== 'federal');
+
+                const upcoming = data.holidays.filter(h => h.status === 'upcoming').length;
+                const added    = data.holidays.filter(h => h.status === 'added').length;
+
+                const btn = document.getElementById('btn-add-all');
+                if (btn) {
+                    btn.querySelector('span').textContent = upcoming > 0
+                        ? `Add Upcoming (${upcoming})`
+                        : 'All Added';
+                    btn.disabled = upcoming === 0;
+                    btn.classList.toggle('opacity-50', upcoming === 0);
+                }
+
+                container.innerHTML = `
+                    <div class="mb-1 text-xs text-zinc-500">
+                        ${added} added &nbsp;•&nbsp; ${upcoming} upcoming &nbsp;•&nbsp;
+                        ${data.holidays.length - added - upcoming} past
+                    </div>
+                    <div class="mt-4">
+                        <div class="text-xs font-semibold uppercase tracking-widest text-zinc-500 mb-2 px-1">Federal</div>
+                        ${_holidayRows(federal)}
+                    </div>
+                    <div class="mt-5">
+                        <div class="text-xs font-semibold uppercase tracking-widest text-zinc-500 mb-2 px-1">Observances</div>
+                        ${_holidayRows(observance)}
+                    </div>
+                `;
+            } catch (err) {
+                container.innerHTML = `<div class="text-red-400 text-sm">Error: ${err}</div>`;
+            }
+        }
+
+        function _holidayRows(holidays) {
+            return holidays.map(h => {
+                const statusBadge = h.status === 'added'
+                    ? '<span class="text-emerald-400 text-xs font-medium">&#x2713; added</span>'
+                    : h.status === 'past'
+                    ? '<span class="text-zinc-600 text-xs">past</span>'
+                    : '<span class="text-amber-400 text-xs font-medium">upcoming</span>';
+
+                const daysLabel = h.days === null ? '—'
+                    : h.days > 1  ? `in ${h.days} days`
+                    : h.days === 1 ? 'tomorrow'
+                    : h.days === 0 ? 'TODAY'
+                    : `${Math.abs(h.days)} days ago`;
+
+                const daysClass = h.days !== null && h.days >= 0 && h.days <= 7
+                    ? 'text-red-400 font-semibold'
+                    : h.days !== null && h.days >= 0 && h.days <= 30
+                    ? 'text-amber-400'
+                    : 'text-zinc-500';
+
+                const dimmed = h.status === 'past' ? 'opacity-50' : '';
+
+                const addBtn = h.status !== 'added'
+                    ? `<button onclick="addHolidays('add-one','${h.name.replace(/'/g, "\\'")}')"
+                               class="text-zinc-600 hover:text-amber-400 p-1.5 transition-colors" title="Add ${h.name}">
+                           <i class="fa-solid fa-plus text-xs"></i>
+                       </button>`
+                    : '<span class="w-7 inline-block"></span>';
+
+                return `
+                    <div class="flex items-center justify-between py-2 px-3 rounded-xl hover:bg-zinc-950 ${dimmed}">
+                        <div class="flex items-center gap-4 min-w-0">
+                            <span class="font-mono text-xs text-zinc-500 w-24 flex-shrink-0">${h.date}</span>
+                            <span class="text-sm text-zinc-100 truncate">${h.name}</span>
+                            ${h.details ? `<span class="hidden sm:inline text-xs text-zinc-600 truncate max-w-xs">${h.details}</span>` : ''}
+                        </div>
+                        <div class="flex items-center gap-4 ml-3 flex-shrink-0">
+                            <span class="font-mono text-xs ${daysClass} w-24 text-right">${daysLabel}</span>
+                            <span class="w-16 text-right">${statusBadge}</span>
+                            ${addBtn}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function addHolidays(action, name) {
+            const statusEl = document.getElementById('holidays-status');
+            if (!statusEl) return;
+
+            statusEl.textContent = action === 'add-one' ? `Adding ${name}…` : 'Adding holidays…';
+            statusEl.className = 'mb-4 px-4 py-2.5 rounded-2xl text-sm font-medium bg-zinc-800 text-zinc-300';
+
+            const formData = new FormData();
+            formData.append('action', action);
+            if (name) formData.append('name', name);
+
+            try {
+                const res = await fetch('/api/holidays/add', { method: 'POST', body: formData });
+                const data = await res.json();
+
+                if (data.success) {
+                    statusEl.textContent = data.message || 'Done!';
+                    statusEl.className = 'mb-4 px-4 py-2.5 rounded-2xl text-sm font-medium bg-emerald-950 text-emerald-300 border border-emerald-800';
+                    loadHolidays();
+                } else {
+                    statusEl.textContent = data.error || 'Failed';
+                    statusEl.className = 'mb-4 px-4 py-2.5 rounded-2xl text-sm font-medium bg-red-950 text-red-300 border border-red-800';
+                }
+                setTimeout(() => {
+                    if (statusEl) statusEl.className = 'hidden mb-4 px-4 py-2.5 rounded-2xl text-sm font-medium';
+                }, 4000);
+            } catch (err) {
+                statusEl.textContent = `Network error: ${err}`;
+                statusEl.className = 'mb-4 px-4 py-2.5 rounded-2xl text-sm font-medium bg-red-950 text-red-300 border border-red-800';
+            }
+        }
     </script>
 </body>
 </html>

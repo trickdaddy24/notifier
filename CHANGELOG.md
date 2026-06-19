@@ -5,7 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [v2.6.3] - 2026-06-19  *(Latest)*
+## [v2.6.4] - 2026-06-19  *(Latest)*
+
+### Added
+
+- **Holidays web UI** — dashboard panel under Countdowns showing all 19 holidays (federal + observances) with date, days-until countdown, and status badge (upcoming / past / added). "Add Upcoming" batch button adds all holidays that haven't passed yet; individual "+" buttons add a single holiday. API: `GET /api/holidays` (list with status) and `POST /api/holidays/add` (action: add-all | add-past | add-one). `notifier/holidays.py` colorama import made optional so the module loads cleanly in the web container.
+
+## [v2.6.3] - 2026-06-19
 
 ### Added
 

@@ -862,6 +862,99 @@ async def api_delete_event(event_id: int, user: Optional[str] = Depends(get_curr
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+# ── Holidays API ──────────────────────────────────────────────────────────────
+
+@app.get("/api/holidays")
+async def get_holidays_list(user: Optional[str] = Depends(get_current_user)):
+    """Return all 2026 holidays with per-entry status (upcoming/past/added)."""
+    if user is None:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        from notifier.holidays import HOLIDAYS_2026, _existing_titles
+        existing = _existing_titles()
+        result = []
+        for h in HOLIDAYS_2026:
+            d = days_until(h.date)
+            past = d is not None and d < 0
+            in_db = h.name.lower() in existing
+            result.append({
+                "name": h.name,
+                "date": h.date,
+                "category": h.category,
+                "details": h.details,
+                "days": d,
+                "status": "added" if in_db else ("past" if past else "upcoming"),
+            })
+        return {"holidays": result}
+    except Exception as e:
+        logger.exception("Failed to list holidays")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/holidays/add")
+async def add_holidays_web(
+    action: str = Form("add-all"),   # add-all | add-past | add-one
+    name: str = Form(""),
+    user: Optional[str] = Depends(get_current_user),
+):
+    """Add 2026 holidays as countdown events.
+
+    action=add-all   — add all upcoming holidays (skip past + existing)
+    action=add-past  — add all holidays including past-dated ones
+    action=add-one   — add a single holiday by partial name match
+    """
+    if user is None:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        from notifier.holidays import HOLIDAYS_2026, _existing_titles, _find_holiday, _add_one
+
+        if action == "add-one":
+            if not name.strip():
+                return JSONResponse({"error": "name is required for add-one"}, status_code=400)
+            h = _find_holiday(name)
+            if h is None:
+                return JSONResponse({"error": f"No holiday matching '{name}'"}, status_code=404)
+            existing = _existing_titles()
+            if h.name.lower() in existing:
+                return {"success": True, "added": 0, "skipped_existing": 1,
+                        "message": f"'{h.name}' is already in your events"}
+            ok = _add_one(h)
+            if ok:
+                logger.info("User '%s' added holiday '%s'", user, h.name)
+                return {"success": True, "added": 1, "skipped_existing": 0,
+                        "message": f"Added '{h.name}' ({h.date})"}
+            return JSONResponse({"error": f"Failed to add '{h.name}'"}, status_code=500)
+
+        # add-all or add-past
+        skip_past = (action == "add-all")
+        existing = _existing_titles()
+        added = skipped_exist = skipped_past = 0
+        for h in HOLIDAYS_2026:
+            d = days_until(h.date)
+            past = d is not None and d < 0
+            if h.name.lower() in existing:
+                skipped_exist += 1
+                continue
+            if skip_past and past:
+                skipped_past += 1
+                continue
+            if _add_one(h):
+                added += 1
+
+        logger.info("User '%s' batch-added %s holidays (action=%s)", user, added, action)
+        parts = [f"Added {added} holiday{'s' if added != 1 else ''}"]
+        if skipped_exist:
+            parts.append(f"{skipped_exist} already existed")
+        if skipped_past:
+            parts.append(f"{skipped_past} past-dated skipped")
+        return {"success": True, "added": added,
+                "skipped_existing": skipped_exist, "skipped_past": skipped_past,
+                "message": " • ".join(parts)}
+    except Exception as e:
+        logger.exception("Failed to add holidays")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 # ── Notification Channels Management API ─────────────────────────────────────
 
 @app.get("/api/channels")

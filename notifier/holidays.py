@@ -21,7 +21,14 @@ from __future__ import annotations
 import os
 from typing import NamedTuple, Optional
 
-from colorama import Fore, Style
+try:
+    from colorama import Fore, Style
+except ImportError:
+    # Web container doesn't install colorama — stub it out so the data/logic
+    # functions work fine without any terminal colour output.
+    class _NullColor:
+        def __getattr__(self, _): return ""
+    Fore = Style = _NullColor()  # type: ignore[assignment]
 
 # All database interaction goes through the shared db layer.
 from notifier.db import (

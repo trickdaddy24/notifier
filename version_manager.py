@@ -150,6 +150,9 @@ SEED_VERSIONS = [
     ("028", "2.6.3",
      "2026 US holidays CLI — new notifier/holidays.py module with 19 holidays (11 federal + 8 observances). Non-interactive: --holidays list|add-all|add-past|add (--holiday-name for fuzzy add). Interactive: main menu option 13 '🎉 Holidays 2026' with numbered table, status badges (upcoming/past/already added), and batch-add. Holidays are added as countdown events so existing milestone scheduler delivers reminders automatically.",
      "2026-06-19 12:00:00"),
+    ("029", "2.6.4",
+     "Holidays web UI — /api/holidays GET (all 19 with status: upcoming/past/added) and POST /api/holidays/add (action: add-all|add-past|add-one). Dashboard Holidays panel shows federal + observance tables with date, days-until, status badge, and per-row Add button. 'Add Upcoming' batch button. colorama import made optional in holidays.py so it loads cleanly in the web container.",
+     "2026-06-19 14:00:00"),
 ]
 
 
