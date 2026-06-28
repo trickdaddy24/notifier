@@ -440,6 +440,23 @@ def send_notifications(verbose: bool = False, only_id: Optional[int] = None) -> 
                 row["id"], row["message"], row["due_ts"], row["recurrence"],
                 row["repeat_time"], row["event_id"],
             )
+
+            # Re-render the countdown at delivery for event-linked ticks. The
+            # stored text is frozen at expansion time, so a tick delivered on a
+            # later calendar day than scheduled (e.g. after the notifier was
+            # down) would otherwise ship a stale day-count — that's the "22 days
+            # when it's really 14" bug. Recomputing here makes late sends
+            # self-correct to today's real number.
+            if ev_id is not None:
+                event = get_event(ev_id)
+                if event:
+                    live_days = event.get("days_left")
+                    if live_days is not None and live_days >= 0:
+                        msg = format_event_message(
+                            event["title"], live_days, event["target_date"],
+                            event.get("category"), event.get("details"),
+                        )
+
             _cprint(f"📢 Sending: {msg}")
             _desktop_notify("⏰ Reminder!", msg)
 

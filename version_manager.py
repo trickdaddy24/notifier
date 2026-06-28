@@ -153,6 +153,9 @@ SEED_VERSIONS = [
     ("029", "2.6.4",
      "Holidays web UI — /api/holidays GET (all 19 with status: upcoming/past/added) and POST /api/holidays/add (action: add-all|add-past|add-one). Dashboard Holidays panel shows federal + observance tables with date, days-until, status badge, and per-row Add button. 'Add Upcoming' batch button. colorama import made optional in holidays.py so it loads cleanly in the web container.",
      "2026-06-19 14:00:00"),
+    ("030", "2.6.5",
+     "Fix stale countdown on late delivery — event-linked ticks now recompute their day-count from the event's target_date at SEND time, so a reminder delivered after downtime (e.g. notifier offline for days) self-corrects to today's real number instead of shipping the frozen value baked at expansion time (the '22 days when it's really 14' bug). Completes the v2.6.2 recurrence-only fix for all expanded milestone/daily ticks. Cruise events switched to daily cadence for an everyday countdown.",
+     "2026-06-28 12:00:00"),
 ]
 
 

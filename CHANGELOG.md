@@ -5,7 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [v2.6.4] - 2026-06-19  *(Latest)*
+## [v2.6.5] - 2026-06-28  *(Latest)*
+
+### Fixed
+
+- **Stale countdown on late delivery** — event-linked notifications now recompute their day-count from the event's `target_date` at *send* time, in the delivery loop (`notifier/notifications.py`). The message text and its day number are baked when the event is expanded into per-day ticks; if a tick is delivered on a later calendar day than scheduled (e.g. the notifier was offline for a stretch), it used to ship the frozen value — this is the *"22 days until the cruise when it's really 14"* bug. The count now self-corrects to today's real number at delivery. Completes the v2.6.2 recurrence-only recompute for **all** expanded milestone/daily ticks.
+
+### Changed
+
+- **Cruise events now run a daily countdown** — switched cruise-category events to `daily` cadence so a fresh reminder fires every day until the day of the cruise (rotating through the 15-template nautical message pack), instead of only hitting the 60/30/14/7/3/1/0 milestones.
+
+## [v2.6.4] - 2026-06-19
 
 ### Added
 

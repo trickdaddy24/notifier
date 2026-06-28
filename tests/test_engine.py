@@ -421,9 +421,11 @@ def test_stale_skip_groups_per_event_and_keeps_newest(engine):
     assert len(calls) == 3
     # Survivors are the NEWEST tick of each event (the 9-days-left one, since
     # the two earliest of 10..0 were backdated and the later of those wins).
+    # The day-count is recomputed live at delivery, so a tick whose stored text
+    # said "9 days" is relabelled to today's real count (target is 10 days out).
     event_msgs = [m for m in calls if "water the plants" not in m]
-    assert any("9 days until Cruise" in m for m in event_msgs)
-    assert any("9 days until Dentist" in m for m in event_msgs)
+    assert any("10 days until Cruise" in m for m in event_msgs)
+    assert any("10 days until Dentist" in m for m in event_msgs)
     with db.get_db() as conn:
         c = conn.cursor()
         stale = c.execute(
