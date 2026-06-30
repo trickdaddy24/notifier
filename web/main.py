@@ -62,7 +62,7 @@ try:
     _to_ts, _now_in_tz, _tz_label, get_time_mode, set_time_mode, to_epoch,
     create_event, list_events, get_event, update_event, delete_event,
     days_until, _parse_event_date, DEFAULT_MILESTONES, DEFAULT_EVENT_SEND_TIME,
-    CADENCES
+    CADENCES, purge_orphan_countdown_notifications,
 )
 except ImportError:
     # Fallback for when running web/ in isolation (development)
@@ -73,7 +73,7 @@ except ImportError:
     _to_ts, _now_in_tz, _tz_label, get_time_mode, set_time_mode, to_epoch,
     create_event, list_events, get_event, update_event, delete_event,
     days_until, _parse_event_date, DEFAULT_MILESTONES, DEFAULT_EVENT_SEND_TIME,
-    CADENCES
+    CADENCES, purge_orphan_countdown_notifications,
 )
 
 
@@ -144,6 +144,16 @@ async def lifespan(app: FastAPI):
     print(f"[notifier-web] Initializing database at {DB_PATH} (using shared notifier.db)")
     init_db(backfill_legacy=False)
     print("[notifier-web] Database ready using shared schema.")
+
+    # Sweep legacy orphan countdown ticks (event_id IS NULL) — they can't be
+    # recomputed at send time and would ship a frozen, eventually-wrong day-count.
+    try:
+        purged = purge_orphan_countdown_notifications()
+        if purged:
+            logger.info("Purged %d orphan countdown notification(s) at startup", purged)
+            print(f"[notifier-web] Purged {purged} orphan countdown tick(s).")
+    except Exception as e:  # noqa: BLE001 — never block startup on cleanup
+        logger.warning("orphan-countdown purge failed: %s", e)
 
     # Optional: Seed sample data
     if os.getenv("SEED_SAMPLE_DATA", "0").lower() in ("1", "true", "yes"):

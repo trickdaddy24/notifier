@@ -156,6 +156,9 @@ SEED_VERSIONS = [
     ("030", "2.6.5",
      "Fix stale countdown on late delivery — event-linked ticks now recompute their day-count from the event's target_date at SEND time, so a reminder delivered after downtime (e.g. notifier offline for days) self-corrects to today's real number instead of shipping the frozen value baked at expansion time (the '22 days when it's really 14' bug). Completes the v2.6.2 recurrence-only fix for all expanded milestone/daily ticks. Cruise events switched to daily cadence for an everyday countdown.",
      "2026-06-28 12:00:00"),
+    ("031", "2.6.6",
+     "Purge orphan countdown ticks at startup — legacy notification rows with a NULL event_id can't be recomputed at send time and dodge the stale-skip dedupe (both key off event_id), so they shipped a permanently-frozen day-count (the Carnival '22 days' that wouldn't go away). The web app now sweeps these on every startup (purge_orphan_countdown_notifications in notifier/db.py). Standalone reminders are untouched. Closes the data side of the stale-countdown bug the v2.6.5 code fix couldn't reach.",
+     "2026-06-30 17:30:00"),
 ]
 
 

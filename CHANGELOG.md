@@ -5,7 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [v2.6.5] - 2026-06-28  *(Latest)*
+## [v2.6.6] - 2026-06-30  *(Latest)*
+
+### Fixed
+
+- **Orphan countdown ticks shipped a permanently-wrong day-count.** Legacy notification rows with a NULL `event_id` (left over from pre-event-linkage versions) can't be recomputed at send time and dodge the stale-skip dedupe — *both* key off `event_id` — so they kept firing a frozen number (the Carnival "22 days" that wouldn't correct itself, even after the v2.6.5 recompute fix). The web app now sweeps these on every startup via `purge_orphan_countdown_notifications()` (`notifier/db.py`). Standalone reminders (no "days until" text) are untouched. This closes the *data* side of the stale-countdown bug that the v2.6.5 *code* fix couldn't reach.
+
+## [v2.6.5] - 2026-06-28
 
 ### Fixed
 

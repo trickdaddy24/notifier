@@ -435,3 +435,36 @@ def test_stale_skip_groups_per_event_and_keeps_newest(engine):
             " AND notification_id = ?", (plain_id,)).fetchone()[0]
     assert stale == 2  # one stale tick retired per event
     assert plain_stale == 0
+
+
+def _insert_with_event(db, message, event_id, sent=0):
+    with db.get_db() as conn:
+        c = conn.cursor()
+        c.execute(
+            "INSERT INTO notifications (message, due_time, due_ts, sent, event_id)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (message, "x", 1000, sent, event_id),
+        )
+        conn.commit()
+        return c.lastrowid
+
+
+def test_purge_orphan_countdowns_removes_only_unlinked_ticks(engine):
+    """v2.6.6: orphan (event_id NULL) countdown ticks are swept; event-linked
+    ticks and standalone reminders survive."""
+    db, _ = engine
+    orphan = _insert(db, "22 days until Carnival Celebration on 2026-07-12", 1000)  # event_id NULL
+    linked = _insert_with_event(db, "12 days until Carnival Celebration", event_id=1)
+    plain = _insert(db, "Take out the trash", 1000)  # NULL event_id but not a countdown
+
+    removed = db.purge_orphan_countdown_notifications()
+    assert removed == 1
+
+    with db.get_db() as conn:
+        ids = {r["id"] for r in conn.execute("SELECT id FROM notifications").fetchall()}
+    assert orphan not in ids       # the unlinked countdown is gone
+    assert linked in ids           # event-linked tick survives
+    assert plain in ids            # standalone reminder survives
+
+    # Idempotent — a second sweep removes nothing.
+    assert db.purge_orphan_countdown_notifications() == 0

@@ -10,7 +10,7 @@ Exposes shared database and notification delivery layers.
 # in the deployed web container `get_app_version()` always falls back to THIS
 # constant — making it the de-facto source of truth for the version badge. Always
 # bump it on every release (it is the only literal that affects the live UI).
-__version__ = "2.6.5"
+__version__ = "2.6.6"
 
 from .db import get_db, init_db, DB_PATH  # noqa: F401,E402
 from .notifications import send_notifications, send_heartbeat, CHANNELS, set_quiet_mode  # noqa: F401,E402

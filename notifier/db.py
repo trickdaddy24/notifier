@@ -499,6 +499,29 @@ def days_until(target_date: str) -> Optional[int]:
     return (d - _now_in_tz().date()).days
 
 
+def purge_orphan_countdown_notifications() -> int:
+    """Delete legacy countdown ticks that lost their event link, returning the
+    count removed.
+
+    A countdown notification whose `event_id` is NULL can never be recomputed at
+    send time and dodges the stale-skip dedupe (both key off event_id), so it
+    ships a frozen — eventually wrong — day-count forever (the "22 days when it's
+    really 12" bug). These only exist as leftovers from pre-event-linkage
+    versions; current expansion always sets event_id. Idempotent and safe to run
+    at every startup; standalone reminders (no "days until" text) are untouched.
+    """
+    with get_db() as conn:
+        ids = [r["id"] for r in conn.execute(
+            "SELECT id FROM notifications "
+            "WHERE event_id IS NULL AND message LIKE '%days until%'"
+        ).fetchall()]
+        if ids:
+            conn.executemany("DELETE FROM logs WHERE notification_id = ?", [(i,) for i in ids])
+            conn.executemany("DELETE FROM notifications WHERE id = ?", [(i,) for i in ids])
+            conn.commit()
+        return len(ids)
+
+
 # Rotating cruise countdown flavour. Every template keeps the literal phrase
 # "{days} days until {title}" so countdown info survives the jokes; selection
 # is days_left % 15 (deterministic, consecutive days never repeat).
