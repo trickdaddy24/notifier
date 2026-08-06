@@ -18,6 +18,15 @@ services:
       - NOTIFIER_DB_PATH=/app/data/notifications.db
       # Set to "1" to auto-seed demo reminders on first run (dev only)
       # - SEED_SAMPLE_DATA=1
+      # Channel creds: the ./.env volume mount below is NOT auto-loaded (no
+      # load_dotenv() call anywhere in this app) -- _get_credential()'s env
+      # fallback reads os.getenv() directly, so values only reach the app if
+      # they're injected here via compose ${VAR} substitution from the host's
+      # own .env, same as NOTIFIER_WEB_PASSWORD above. Found 2026-08-06: this
+      # was missing entirely, so Telegram silently never sent anything despite
+      # ./.env having real values on disk the whole time.
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
 
       # Heartbeat settings (sent to Telegram)
       # HEARTBEAT_INTERVAL=6          # Send every N hours (0 = disabled)
